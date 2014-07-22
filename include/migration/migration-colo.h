@@ -22,4 +22,10 @@ bool colo_supported(void);
 bool migrate_use_colo(void);
 void colo_init_checkpointer(MigrationState *s);
 
+/* restore */
+bool restore_use_colo(void);
+void restore_exit_colo(void);
+
+void colo_process_incoming_checkpoints(QEMUFile *f);
+
 #endif

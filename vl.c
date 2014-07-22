@@ -89,6 +89,7 @@ int main(int argc, char **argv)
 #include "sysemu/dma.h"
 #include "audio/audio.h"
 #include "migration/migration.h"
+#include "migration/migration-colo.h"
 #include "sysemu/kvm.h"
 #include "qapi/qmp/qjson.h"
 #include "qemu/option.h"
@@ -4339,6 +4340,9 @@ int main(int argc, char **argv, char **envp)
 
     blk_mig_init();
     ram_mig_init();
+    if (colo_supported()) {
+        colo_info_mig_init();
+    }
 
     /* open the virtual block devices */
     if (snapshot)

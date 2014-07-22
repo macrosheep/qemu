@@ -50,6 +50,7 @@ common-obj-$(CONFIG_POSIX) += os-posix.o
 common-obj-$(CONFIG_LINUX) += fsdev/
 
 common-obj-y += migration.o migration-tcp.o
+common-obj-y += migration-colo-comm.o
 common-obj-$(CONFIG_COLO) += migration-colo.o
 common-obj-y += vmstate.o
 common-obj-y += qemu-file.o

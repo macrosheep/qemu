@@ -10,6 +10,7 @@
 
 #include "qemu/main-loop.h"
 #include "qemu/thread.h"
+#include "block/coroutine.h"
 #include "migration/migration-colo.h"
 
 static QEMUBH *colo_bh;
@@ -59,4 +60,25 @@ void colo_init_checkpointer(MigrationState *s)
 {
     colo_bh = qemu_bh_new(colo_start_checkpointer, s);
     qemu_bh_schedule(colo_bh);
+}
+
+/* restore */
+
+static Coroutine *colo = NULL;
+
+void *colo_process_incoming_checkpoints(void *opaque)
+{
+    if (!restore_use_colo()) {
+        return NULL;
+    }
+
+    colo = qemu_coroutine_self();
+    assert(colo != NULL);
+
+    /* TODO: COLO checkpointed restore loop */
+
+    colo = NULL;
+    restore_exit_colo();
+
+    return NULL;
 }

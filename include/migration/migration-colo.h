@@ -12,6 +12,9 @@
 #define QEMU_MIGRATION_COLO_H
 
 #include "qemu-common.h"
+#include "migration/migration.h"
+
+void colo_info_mig_init(void);
 
 bool colo_supported(void);
 

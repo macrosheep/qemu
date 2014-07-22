@@ -86,6 +86,9 @@ static void process_incoming_migration_co(void *opaque)
     int ret;
 
     ret = qemu_loadvm_state(f);
+    if (!ret) {
+        colo_process_incoming_checkpoints(f);
+    }
     qemu_fclose(f);
     free_xbzrle_decoded_buf();
     if (ret < 0) {

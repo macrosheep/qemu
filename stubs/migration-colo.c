@@ -14,3 +14,7 @@ bool colo_supported(void)
 {
     return false;
 }
+
+void colo_init_checkpointer(MigrationState *s)
+{
+}

@@ -18,4 +18,8 @@ void colo_info_mig_init(void);
 
 bool colo_supported(void);
 
+/* save */
+bool migrate_use_colo(void);
+void colo_init_checkpointer(MigrationState *s);
+
 #endif

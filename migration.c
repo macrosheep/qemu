@@ -25,6 +25,7 @@
 #include "qemu/thread.h"
 #include "qmp-commands.h"
 #include "trace.h"
+#include "migration/migration-colo.h"
 
 enum {
     MIG_STATE_ERROR = -1,
@@ -277,6 +278,13 @@ void qmp_migrate_set_capabilities(MigrationCapabilityStatusList *params,
     }
 
     for (cap = params; cap; cap = cap->next) {
+        if (cap->value->capability == MIGRATION_CAPABILITY_COLO &&
+            cap->value->state && !colo_supported()) {
+            error_setg(errp, "COLO is not currently supported, please rerun"
+                             " configure with --enable-colo option in order to"
+                             " support COLO feature");
+            continue;
+        }
         s->enabled_capabilities[cap->value->capability] = cap->value->state;
     }
 }

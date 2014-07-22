@@ -38,6 +38,16 @@ static void colo_info_save(QEMUFile *f, void *opaque)
 
 /* restore */
 
+bool restore_use_colo(void)
+{
+    return colo_requested;
+}
+
+void restore_exit_colo(void)
+{
+    colo_requested = false;
+}
+
 static int colo_info_load(QEMUFile *f, void *opaque, int version_id)
 {
     int value = qemu_get_byte(f);

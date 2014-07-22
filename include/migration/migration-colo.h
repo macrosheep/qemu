@@ -18,8 +18,20 @@ void colo_info_mig_init(void);
 
 bool colo_supported(void);
 
+struct colo_incoming {
+    QEMUFile *file;
+    QemuThread thread;
+    QEMUBH *bh;
+};
+
 /* save */
 bool migrate_use_colo(void);
 void colo_init_checkpointer(MigrationState *s);
+
+/* restore */
+extern Coroutine *migration_incoming_co;
+bool restore_use_colo(void);
+void restore_exit_colo(void);
+void *colo_process_incoming_checkpoints(void *opaque);
 
 #endif

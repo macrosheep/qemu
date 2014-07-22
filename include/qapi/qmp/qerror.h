@@ -166,4 +166,7 @@ void qerror_report_err(Error *err);
 #define QERR_SOCKET_CREATE_FAILED \
     ERROR_CLASS_GENERIC_ERROR, "Failed to create socket"
 
+#define QERR_COLO_UNSUPPORTED \
+    ERROR_CLASS_GENERIC_ERROR, "COLO is not currently supported, please rerun configure with --enable-colo option in order to support COLO feature"
+
 #endif /* QERROR_H */

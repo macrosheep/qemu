@@ -25,7 +25,7 @@ static bool colo_requested;
 
 /* save */
 
-static bool migrate_use_colo(void)
+bool migrate_use_colo(void)
 {
     MigrationState *s = migrate_get_current();
     return s->enabled_capabilities[MIGRATION_CAPABILITY_COLO];

@@ -14,6 +14,7 @@
 #include "migration/migration-colo.h"
 
 static QEMUBH *colo_bh;
+QEMUSizedBuffer colo_buffer;
 
 bool colo_supported(void)
 {

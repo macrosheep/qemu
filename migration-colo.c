@@ -426,8 +426,11 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
 {
     int fd = qemu_get_fd(f);
     int dev_hotplug = qdev_hotplug;
-    QEMUFile *ctl = NULL;
+    QEMUFile *ctl = NULL, *fb = NULL;
     int ret;
+    uint64_t total_size;
+    uint8_t *buf;
+    QEMUSizedBuffer *colo_buffer;
 
     if (!restore_use_colo()) {
         return;
@@ -449,7 +452,8 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
         goto out;
     }
 
-    /* TODO: in COLO mode, slave is runing, so start the vm */
+    /* in COLO mode, slave is runing, so start the vm */
+    vm_start();
 
     while (true) {
         if (slave_wait_new_checkpoint(f)) {
@@ -458,7 +462,8 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
 
         /* start colo checkpoint */
 
-        /* TODO: suspend guest */
+        /* suspend guest */
+        vm_stop_force_state(RUN_STATE_COLO);
 
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_SUSPENDED);
         if (ret) {
@@ -470,25 +475,54 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
             goto out;
         }
 
-        /* TODO: read migration data into colo buffer */
+        /* read migration data into colo buffer */
+
+        /* read the vmstate total size first */
+        ret = colo_ctl_get_value(f, &total_size);
+        if (ret) {
+            goto out;
+        }
+        buf = g_malloc(total_size);
+        qemu_get_buffer(f, buf, total_size);
+        colo_buffer = qsb_create(buf, total_size);
+        g_free(buf);
 
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_RECEIVED);
         if (ret) {
             goto out;
         }
 
-        /* TODO: load vm state */
+        /* open colo buffer for read */
+        fb = qemu_bufopen("r", colo_buffer);
+        if (!fb) {
+            error_report("can't open colo buffer for read");
+            goto out;
+        }
+
+        /* load vm state */
+        if (qemu_loadvm_state(fb) < 0) {
+            error_report("COLO: loadvm failed\n");
+            goto out;
+        }
 
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_LOADED);
         if (ret) {
             goto out;
         }
 
-        /* TODO: resume guest */
+        /* resume guest */
+        vm_start();
+
+        qemu_fclose(fb);
+        fb = NULL;
     }
 
 out:
     colo = NULL;
+
+    if (fb) {
+        qemu_fclose(fb);
+    }
 
     if (ctl) {
         qemu_fclose(ctl);

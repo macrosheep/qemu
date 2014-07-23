@@ -137,8 +137,6 @@ static int colo_agent_postresume(void)
 }
 
 /* colo checkpoint control helper */
-static bool colo_is_master(void);
-static bool colo_is_slave(void);
 
 static void ctl_error_handler(void *opaque, int err)
 {
@@ -211,7 +209,7 @@ static int colo_ctl_get(QEMUFile *f, uint64_t require)
 
 /* save */
 
-static bool colo_is_master(void)
+bool colo_is_master(void)
 {
     MigrationState *s = migrate_get_current();
     return (s->state == MIG_STATE_COLO);
@@ -411,7 +409,7 @@ void colo_init_checkpointer(MigrationState *s)
 
 static Coroutine *colo;
 
-static bool colo_is_slave(void)
+bool colo_is_slave(void)
 {
     return colo != NULL;
 }

@@ -14,6 +14,7 @@
 #include "qemu/error-report.h"
 #include "hw/qdev-core.h"
 #include "qemu/timer.h"
+#include "sysemu/sysemu.h"
 #include "migration/migration-colo.h"
 #include <sys/ioctl.h>
 
@@ -106,12 +107,12 @@ static int colo_compare(void)
     return ioctl(comp_fd, COMP_IOCTWAIT, 250);
 }
 
-static __attribute__((unused)) int colo_compare_flush(void)
+static int colo_compare_flush(void)
 {
     return ioctl(comp_fd, COMP_IOCTFLUSH, 1);
 }
 
-static __attribute__((unused)) int colo_compare_resume(void)
+static int colo_compare_resume(void)
 {
     return ioctl(comp_fd, COMP_IOCTRESUME, 1);
 }
@@ -315,30 +316,61 @@ static int do_colo_transaction(MigrationState *s, QEMUFile *control,
         goto out;
     }
 
-    /* TODO: suspend and save vm state to colo buffer */
+    /* suspend and save vm state to colo buffer */
+
+    qemu_mutex_lock_iothread();
+    vm_stop_force_state(RUN_STATE_COLO);
+    qemu_mutex_unlock_iothread();
+    /* Disable block migration */
+    s->params.blk = 0;
+    s->params.shared = 0;
+    qemu_savevm_state_begin(trans, &s->params);
+    qemu_savevm_state_complete(trans);
+
+    qemu_fflush(trans);
 
     ret = colo_ctl_put(s->file, COLO_CHECKPOINT_SEND);
     if (ret) {
         goto out;
     }
 
-    /* TODO: send vmstate to slave */
+    /* send vmstate to slave */
+
+    /* we send the total size of the vmstate first */
+    ret = colo_ctl_put(s->file, colo_buffer.used);
+    if (ret) {
+        goto out;
+    }
+
+    qemu_put_buffer_async(s->file, colo_buffer.data, colo_buffer.used);
+    ret = qemu_file_get_error(s->file);
+    if (ret < 0) {
+        goto out;
+    }
+    qemu_fflush(s->file);
 
     ret = colo_ctl_get(control, COLO_CHECKPOINT_RECEIVED);
     if (ret) {
         goto out;
     }
 
-    /* TODO: Flush network etc. */
+    /* Flush network etc. */
+    colo_compare_flush();
 
     ret = colo_ctl_get(control, COLO_CHECKPOINT_LOADED);
     if (ret) {
         goto out;
     }
 
-    /* TODO: resume master */
+    colo_compare_resume();
+    ret = 0;
 
 out:
+    /* resume master */
+    qemu_mutex_lock_iothread();
+    vm_start();
+    qemu_mutex_unlock_iothread();
+
     return ret;
 }
 

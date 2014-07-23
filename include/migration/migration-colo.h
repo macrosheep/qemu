@@ -35,4 +35,8 @@ void restore_exit_colo(void);
 void *colo_process_incoming_checkpoints(void *opaque);
 bool colo_is_slave(void);
 
+/* ram cache */
+void create_and_init_ram_cache(void);
+void release_ram_cache(void);
+
 #endif

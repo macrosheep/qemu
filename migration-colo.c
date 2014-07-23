@@ -187,6 +187,12 @@ static const QEMUFileOps colo_read_ops = {
 
 /* save */
 
+static __attribute__((unused)) bool is_master(void)
+{
+    MigrationState *s = migrate_get_current();
+    return (s->state == MIG_STATE_COLO);
+}
+
 static void *colo_thread(void *opaque)
 {
     MigrationState *s = opaque;
@@ -274,6 +280,11 @@ void colo_init_checkpointer(MigrationState *s)
 /* restore */
 
 static Coroutine *colo;
+
+static __attribute__((unused)) bool is_slave(void)
+{
+    return colo != NULL;
+}
 
 /*
  * return:

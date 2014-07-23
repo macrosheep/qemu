@@ -102,6 +102,12 @@ static __attribute__((unused)) int colo_agent_postresume(void)
 
 /* save */
 
+static __attribute__((unused)) bool colo_is_master(void)
+{
+    MigrationState *s = migrate_get_current();
+    return (s->state == MIG_STATE_COLO);
+}
+
 static void *colo_thread(void *opaque)
 {
     MigrationState *s = opaque;
@@ -184,6 +190,11 @@ void colo_init_checkpointer(MigrationState *s)
 /* restore */
 
 static Coroutine *colo;
+
+static __attribute__((unused)) bool colo_is_slave(void)
+{
+    return colo != NULL;
+}
 
 /*
  * return:

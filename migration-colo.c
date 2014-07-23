@@ -12,6 +12,7 @@
 #include "qemu/thread.h"
 #include "block/coroutine.h"
 #include "qemu/error-report.h"
+#include "hw/qdev-core.h"
 #include "migration/migration-colo.h"
 
 static QEMUBH *colo_bh;
@@ -130,6 +131,9 @@ static const QEMUFileOps colo_read_ops = {
 static void *colo_thread(void *opaque)
 {
     MigrationState *s = opaque;
+    int dev_hotplug = qdev_hotplug;
+
+    qdev_hotplug = 0;
 
     colo_buffer_init();
 
@@ -144,6 +148,8 @@ static void *colo_thread(void *opaque)
     qemu_mutex_lock_iothread();
     qemu_bh_schedule(s->cleanup_bh);
     qemu_mutex_unlock_iothread();
+
+    qdev_hotplug = dev_hotplug;
 
     return NULL;
 }
@@ -179,9 +185,13 @@ static Coroutine *colo;
 
 void colo_process_incoming_checkpoints(QEMUFile *f)
 {
+    int dev_hotplug = qdev_hotplug;
+
     if (!restore_use_colo()) {
         return;
     }
+
+    qdev_hotplug = 0;
 
     colo = qemu_coroutine_self();
     assert(colo != NULL);
@@ -193,6 +203,8 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
     colo_buffer_destroy();
     colo = NULL;
     restore_exit_colo();
+
+    qdev_hotplug = dev_hotplug;
 
     return;
 }

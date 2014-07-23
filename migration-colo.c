@@ -13,13 +13,72 @@
 #include "block/coroutine.h"
 #include "qemu/error-report.h"
 #include "hw/qdev-core.h"
+#include "qemu/timer.h"
 #include "migration/migration-colo.h"
+#include <sys/ioctl.h>
+
+/*
+ * checkpoint timer: unit ms
+ * this is large because COLO checkpoint will mostly depend on
+ * COLO compare module.
+ */
+#define CHKPOINT_TIMER 10000
 
 static QEMUBH *colo_bh;
 
 bool colo_supported(void)
 {
     return true;
+}
+
+/* colo compare */
+#define COMP_IOC_MAGIC 'k'
+#define COMP_IOCTWAIT   _IO(COMP_IOC_MAGIC, 0)
+#define COMP_IOCTFLUSH  _IO(COMP_IOC_MAGIC, 1)
+#define COMP_IOCTRESUME _IO(COMP_IOC_MAGIC, 2)
+
+#define COMPARE_DEV "/dev/HA_compare"
+/* COLO compare module FD */
+static int comp_fd = -1;
+
+static int colo_compare_init(void)
+{
+    comp_fd = open(COMPARE_DEV, O_RDONLY);
+    if (comp_fd < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+static void colo_compare_destroy(void)
+{
+    if (comp_fd >= 0) {
+        close(comp_fd);
+        comp_fd = -1;
+    }
+}
+
+/*
+ * Communicate with COLO Agent through ioctl.
+ * return:
+ * 0: start a checkpoint
+ * other: errno == ETIME or ERESTART, try again
+ *        errno == other, error, quit colo save
+ */
+static int colo_compare(void)
+{
+    return ioctl(comp_fd, COMP_IOCTWAIT, 250);
+}
+
+static __attribute__((unused)) int colo_compare_flush(void)
+{
+    return ioctl(comp_fd, COMP_IOCTFLUSH, 1);
+}
+
+static __attribute__((unused)) int colo_compare_resume(void)
+{
+    return ioctl(comp_fd, COMP_IOCTRESUME, 1);
 }
 
 /* colo buffer */
@@ -131,15 +190,48 @@ static const QEMUFileOps colo_read_ops = {
 static void *colo_thread(void *opaque)
 {
     MigrationState *s = opaque;
-    int dev_hotplug = qdev_hotplug;
+    int dev_hotplug = qdev_hotplug, wait_cp = 0;
+    int64_t start_time = qemu_clock_get_ms(QEMU_CLOCK_HOST);
+    int64_t current_time;
+
+    if (colo_compare_init() < 0) {
+        error_report("Init colo compare error\n");
+        goto out;
+    }
 
     qdev_hotplug = 0;
 
     colo_buffer_init();
 
-    /*TODO: COLO checkpointed save loop*/
+    while (s->state == MIG_STATE_COLO) {
+        /* wait for a colo checkpoint */
+        wait_cp = colo_compare();
+        if (wait_cp) {
+            if (errno != ETIME && errno != ERESTART) {
+                error_report("compare module failed(%s)", strerror(errno));
+                goto out;
+            }
+            /*
+             * no checkpoint is needed, wait for 1ms and then
+             * check if we need checkpoint
+             */
+            current_time = qemu_clock_get_ms(QEMU_CLOCK_HOST);
+            if (current_time - start_time < CHKPOINT_TIMER) {
+                usleep(1000);
+                continue;
+            }
+        }
 
+        /* start a colo checkpoint */
+
+        /*TODO: COLO save */
+
+        start_time = qemu_clock_get_ms(QEMU_CLOCK_HOST);
+    }
+
+out:
     colo_buffer_destroy();
+    colo_compare_destroy();
 
     if (s->state != MIG_STATE_ERROR) {
         migrate_set_state(s, MIG_STATE_COLO, MIG_STATE_COMPLETED);
@@ -183,6 +275,17 @@ void colo_init_checkpointer(MigrationState *s)
 
 static Coroutine *colo;
 
+/*
+ * return:
+ * 0: start a checkpoint
+ * 1: some error happend, exit colo restore
+ */
+static int slave_wait_new_checkpoint(QEMUFile *f)
+{
+    /* TODO: wait checkpoint start command from master */
+    return 1;
+}
+
 void colo_process_incoming_checkpoints(QEMUFile *f)
 {
     int dev_hotplug = qdev_hotplug;
@@ -198,7 +301,13 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
 
     colo_buffer_init();
 
-    /* TODO: COLO checkpointed restore loop */
+    while (true) {
+        if (slave_wait_new_checkpoint(f)) {
+            break;
+        }
+
+        /* TODO: COLO restore */
+    }
 
     colo_buffer_destroy();
     colo = NULL;

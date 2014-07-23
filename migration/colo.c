@@ -475,6 +475,8 @@ void *colo_process_incoming_checkpoints(void *opaque)
         goto out;
     }
 
+    create_and_init_ram_cache();
+
     ret = colo_ctl_put(ctl, COLO_READY);
     if (ret) {
         goto out;
@@ -565,6 +567,8 @@ out:
     if (fb) {
         qemu_fclose(fb);
     }
+
+    release_ram_cache();
 
     if (ctl) {
         qemu_fclose(ctl);

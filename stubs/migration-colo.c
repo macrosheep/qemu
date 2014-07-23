@@ -22,3 +22,13 @@ void colo_init_checkpointer(MigrationState *s)
 void colo_process_incoming_checkpoints(QEMUFile *f)
 {
 }
+
+bool colo_is_master(void)
+{
+    return false;
+}
+
+bool colo_is_slave(void)
+{
+    return false;
+}

@@ -11,6 +11,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/thread.h"
 #include "block/coroutine.h"
+#include "hw/qdev-core.h"
 #include "migration/migration-colo.h"
 
 static QEMUBH *colo_bh;
@@ -25,6 +26,9 @@ bool colo_supported(void)
 static void *colo_thread(void *opaque)
 {
     MigrationState *s = opaque;
+    int dev_hotplug = qdev_hotplug;
+
+    qdev_hotplug = 0;
 
     /*TODO: COLO checkpointed save loop*/
 
@@ -33,6 +37,8 @@ static void *colo_thread(void *opaque)
     qemu_mutex_lock_iothread();
     qemu_bh_schedule(s->cleanup_bh);
     qemu_mutex_unlock_iothread();
+
+    qdev_hotplug = dev_hotplug;
 
     return NULL;
 }
@@ -68,9 +74,13 @@ static Coroutine *colo;
 
 void *colo_process_incoming_checkpoints(void *opaque)
 {
+    int dev_hotplug = qdev_hotplug;
+
     if (!restore_use_colo()) {
         return NULL;
     }
+
+    qdev_hotplug = 0;
 
     colo = qemu_coroutine_self();
     assert(colo != NULL);
@@ -79,6 +89,8 @@ void *colo_process_incoming_checkpoints(void *opaque)
 
     colo = NULL;
     restore_exit_colo();
+
+    qdev_hotplug = dev_hotplug;
 
     return NULL;
 }

@@ -21,10 +21,12 @@ bool colo_supported(void);
 /* save */
 bool migrate_use_colo(void);
 void colo_init_checkpointer(MigrationState *s);
+bool colo_is_master(void);
 
 /* restore */
 bool restore_use_colo(void);
 void restore_exit_colo(void);
+bool colo_is_slave(void);
 
 void colo_process_incoming_checkpoints(QEMUFile *f);
 

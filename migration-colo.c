@@ -23,7 +23,7 @@
  * this is large because COLO checkpoint will mostly depend on
  * COLO compare module.
  */
-#define CHKPOINT_TIMER 10000
+#define CHKPOINT_TIMER 500
 
 enum {
     COLO_READY = 0x46,
@@ -79,11 +79,6 @@ static int comp_fd = -1;
 
 static int colo_compare_init(void)
 {
-    comp_fd = open(COMPARE_DEV, O_RDONLY);
-    if (comp_fd < 0) {
-        return -1;
-    }
-
     return 0;
 }
 
@@ -104,17 +99,18 @@ static void colo_compare_destroy(void)
  */
 static int colo_compare(void)
 {
-    return ioctl(comp_fd, COMP_IOCTWAIT, 250);
+    errno = ERESTART;
+    return 1;
 }
 
 static int colo_compare_flush(void)
 {
-    return ioctl(comp_fd, COMP_IOCTFLUSH, 1);
+    return 0;
 }
 
 static int colo_compare_resume(void)
 {
-    return ioctl(comp_fd, COMP_IOCTRESUME, 1);
+    return 0;
 }
 
 /* colo buffer */

@@ -23,3 +23,13 @@ void *colo_process_incoming_checkpoints(void *opaque)
 {
     return NULL;
 }
+
+bool colo_is_master(void)
+{
+    return false;
+}
+
+bool colo_is_slave(void)
+{
+    return false;
+}

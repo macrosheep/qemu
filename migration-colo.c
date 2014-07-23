@@ -13,6 +13,7 @@
 #include "block/coroutine.h"
 #include "hw/qdev-core.h"
 #include "qemu/timer.h"
+#include "sysemu/sysemu.h"
 #include "migration/migration-colo.h"
 #include <sys/ioctl.h>
 #include "qemu/error-report.h"
@@ -65,6 +66,11 @@ bool colo_supported(void)
 {
     return true;
 }
+
+/* colo buffer */
+#define COLO_BUFFER_BASE_SIZE (1000*1000*4ULL)
+
+QEMUSizedBuffer *colo_buffer;
 
 /* colo agent */
 #define COMP_IOC_MAGIC          'k'
@@ -125,12 +131,12 @@ static int colo_agent_wait_checkpoint(void)
     return ioctl(vm_fd, COMP_IOCTWAIT, COMP_IOCTWAIT_TIMEOUT);
 }
 
-static __attribute__((unused)) int colo_agent_preresume(void)
+static int colo_agent_preresume(void)
 {
     return ioctl(vm_fd, COMP_IOCTFLUSH);
 }
 
-static __attribute__((unused)) int colo_agent_postresume(void)
+static int colo_agent_postresume(void)
 {
     return ioctl(vm_fd, COMP_IOCTRESUME);
 }
@@ -219,6 +225,8 @@ static bool colo_is_master(void)
 static int do_colo_transaction(MigrationState *s, QEMUFile *control)
 {
     int ret;
+    size_t size;
+    QEMUFile *trans = NULL;
 
     ret = colo_ctl_put(s->file, COLO_CHECKPOINT_NEW);
     if (ret) {
@@ -230,30 +238,73 @@ static int do_colo_transaction(MigrationState *s, QEMUFile *control)
         goto out;
     }
 
-    /* TODO: suspend and save vm state to colo buffer */
+    /* Reset colo buffer and open it for write */
+    qsb_set_length(colo_buffer, 0);
+    trans = qemu_bufopen("w", colo_buffer);
+    if (!trans) {
+        error_report("Open colo buffer for write failed");
+        goto out;
+    }
+
+    /* suspend and save vm state to colo buffer */
+    qemu_mutex_lock_iothread();
+    vm_stop_force_state(RUN_STATE_COLO);
+    qemu_mutex_unlock_iothread();
+    /* Disable block migration */
+    s->params.blk = 0;
+    s->params.shared = 0;
+    qemu_savevm_state_begin(trans, &s->params);
+    qemu_savevm_state_complete(trans);
+
+    qemu_fflush(trans);
 
     ret = colo_ctl_put(s->file, COLO_CHECKPOINT_SEND);
     if (ret) {
         goto out;
     }
 
-    /* TODO: send vmstate to slave */
+    /* send vmstate to slave */
+
+    /* we send the total size of the vmstate first */
+    size = qsb_get_length(colo_buffer);
+    ret = colo_ctl_put(s->file, size);
+    if (ret) {
+        goto out;
+    }
+
+    qsb_put_buffer(s->file, colo_buffer, size);
+    ret = qemu_file_get_error(s->file);
+    if (ret < 0) {
+        goto out;
+    }
+    qemu_fflush(s->file);
 
     ret = colo_ctl_get(control, COLO_CHECKPOINT_RECEIVED);
     if (ret) {
         goto out;
     }
 
-    /* TODO: Flush network etc. */
-
     ret = colo_ctl_get(control, COLO_CHECKPOINT_LOADED);
     if (ret) {
         goto out;
     }
 
-    /* TODO: resume master */
+    ret = 0;
 
 out:
+    if (trans)
+        qemu_fclose(trans);
+
+    /* Flush network etc. */
+    colo_agent_preresume();
+
+    /* resume master */
+    qemu_mutex_lock_iothread();
+    vm_start();
+    qemu_mutex_unlock_iothread();
+
+    colo_agent_postresume();
+
     return ret;
 }
 
@@ -288,6 +339,8 @@ static void *colo_thread(void *opaque)
         goto out;
     }
 
+    colo_buffer = qsb_create(NULL, COLO_BUFFER_BASE_SIZE);
+
     while (s->state == MIG_STATE_COLO) {
         /* wait for a colo checkpoint */
         wait_cp = colo_agent_wait_checkpoint();
@@ -308,7 +361,6 @@ static void *colo_thread(void *opaque)
         }
 
         /* start a colo checkpoint */
-
         if (do_colo_transaction(s, colo_control)) {
             goto out;
         }

@@ -29,5 +29,8 @@ void restore_exit_colo(void);
 bool is_slave(void);
 
 void colo_process_incoming_checkpoints(QEMUFile *f);
+/* ram cache */
+void create_and_init_ram_cache(void);
+void release_ram_cache(void);
 
 #endif

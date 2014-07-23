@@ -300,6 +300,7 @@ CPUArchState *cpu_copy(CPUArchState *env);
 typedef struct RAMBlock {
     struct MemoryRegion *mr;
     uint8_t *host;
+    uint8_t *host_cache;
     ram_addr_t offset;
     ram_addr_t length;
     uint32_t flags;

@@ -11,6 +11,7 @@
 #include "net/net.h"
 #include "net/colo-nic.h"
 #include "qemu/error-report.h"
+#include "migration/migration-colo.h"
 
 typedef struct nic_device {
     NetClientState *nc;
@@ -131,6 +132,35 @@ static int nic_configure(NetClientState *nc, bool up, bool is_slave)
     return ret;
 }
 
+static int configure_one_nic(NetClientState *nc, bool up, bool is_slave)
+{
+    struct nic_device *nic;
+
+    if (!nc) {
+        return -1;
+    }
+
+    QTAILQ_FOREACH(nic, &nic_devices, next) {
+        if (nic->nc == nc) {
+            if (!nic->support_colo || !nic->support_colo(nic->nc)
+                || !nic->configure) {
+                return -1;
+            }
+            if (up == nic->is_up) {
+                return 0;
+            }
+
+            if (nic->configure(nic->nc, up, is_slave) && up) {
+                return -1;
+            }
+            nic->is_up = up;
+            return 0;
+        }
+    }
+
+    return -1;
+}
+
 void colo_add_nic_devices(NetClientState *nc)
 {
     struct nic_device *nic = g_malloc0(sizeof(*nic));
@@ -158,9 +188,40 @@ void colo_remove_nic_devices(NetClientState *nc)
 
     QTAILQ_FOREACH_SAFE(nic, &nic_devices, next, next_nic) {
         if (nic->nc == nc) {
-            /* TODO: teardown colo nic */
+            if (colo_is_slave()) {
+                configure_one_nic(nc, 0, 1);
+            }
+            if (colo_is_master()) {
+                configure_one_nic(nc, 0, 0);
+            }
             QTAILQ_REMOVE(&nic_devices, nic, next);
             g_free(nic);
         }
+    }
+}
+
+int colo_configure_nic(bool is_slave)
+{
+    struct nic_device *nic;
+
+    if (QTAILQ_EMPTY(&nic_devices)) {
+        return -1;
+    }
+
+    QTAILQ_FOREACH(nic, &nic_devices, next) {
+        if (configure_one_nic(nic->nc, 1, is_slave)) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+void colo_teardown_nic(bool is_slave)
+{
+    struct nic_device *nic;
+
+    QTAILQ_FOREACH(nic, &nic_devices, next) {
+        configure_one_nic(nic->nc, 0, is_slave);
     }
 }

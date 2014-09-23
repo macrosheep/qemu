@@ -13,5 +13,7 @@
 
 void colo_add_nic_devices(NetClientState *nc);
 void colo_remove_nic_devices(NetClientState *nc);
+int colo_configure_nic(bool is_slave);
+void colo_teardown_nic(bool is_slave);
 
 #endif

@@ -10,6 +10,7 @@
  */
 #include "net/net.h"
 #include "net/colo-nic.h"
+#include "qemu/error-report.h"
 
 typedef struct nic_device {
     NetClientState *nc;
@@ -26,11 +27,119 @@ static bool nic_support_colo(NetClientState *nc)
     return nc && nc->colo_script[0] && nc->colo_nicname[0];
 }
 
+#define STDOUT_BUF_LEN 1024
+static char stdout_buf[STDOUT_BUF_LEN];
+
+static int launch_colo_script(char *argv[])
+{
+    int pid, status;
+    char *script = argv[0];
+    int fds[2];
+
+    bzero(stdout_buf, sizeof(stdout_buf));
+
+    if (pipe(fds) < 0) {
+        return -1;
+    }
+    /* try to launch network script */
+    pid = fork();
+    if (pid == 0) {
+        close(fds[0]);
+        dup2(fds[1], STDOUT_FILENO);
+        execv(script, argv);
+        _exit(1);
+    } else if (pid > 0) {
+        FILE *stream;
+        int n;
+        close(fds[1]);
+        stream = fdopen(fds[0], "r");
+        n = fread(stdout_buf, 1, STDOUT_BUF_LEN - 1, stream);
+        stdout_buf[n] = '\0';
+        close(fds[0]);
+
+        while (waitpid(pid, &status, 0) != pid) {
+            /* loop */
+        }
+
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            return 0;
+        }
+    }
+    fprintf(stderr, "%s\n", stdout_buf);
+    fprintf(stderr, "%s: could not launch network script\n", script);
+    return -1;
+}
+
+static void store_ifbname(NetClientState *nc)
+{
+    char *str_b = NULL, *str_e = NULL;
+
+    str_b = strstr(stdout_buf, "ifb0=");
+    if (str_b) {
+        str_e = strstr(str_b, "\n");
+    }
+    if (str_e) {
+        snprintf(nc->ifb[0], str_e - str_b - 5 + 1, "%s", str_b + 5);
+    }
+
+    str_b = str_e = NULL;
+    str_b = strstr(stdout_buf, "ifb1=");
+    if (str_b) {
+        str_e = strstr(str_b, "\n");
+    }
+    if (str_e) {
+        snprintf(nc->ifb[1], str_e - str_b - 5 + 1, "%s", str_b + 5);
+    }
+}
+
+static int nic_configure(NetClientState *nc, bool up, bool is_slave)
+{
+    char *argv[8];
+    char **parg;
+    int ret = -1, i;
+    int argc = (!is_slave && !up) ? 7 : 5;
+    char pid[20];
+
+    if (!nc) {
+        error_report("Can not parse colo_script or colo_nicname");
+        return ret;
+    }
+
+    parg = argv;
+    *parg++ = nc->colo_script;
+    snprintf(pid, 20, "%d", (int)getpid());
+    *parg++ = pid;
+    *parg++ = (char *)(is_slave ? "slaver" : "master");
+    *parg++ = (char *)(up ? "install" : "uninstall");
+    *parg++ = nc->ifname;
+    *parg++ = nc->colo_nicname;
+    if (!is_slave && !up) {
+        *parg++ = nc->ifb[0];
+        *parg++ = nc->ifb[1];
+    }
+    *parg = NULL;
+
+    for (i = 0; i < argc; i++) {
+        if (!argv[i][0]) {
+            error_report("Can not get colo_script argument");
+            return ret;
+        }
+    }
+
+    ret = launch_colo_script(argv);
+    if (!is_slave && up && ret == 0) {
+        store_ifbname(nc);
+    }
+
+    return ret;
+}
+
 void colo_add_nic_devices(NetClientState *nc)
 {
     struct nic_device *nic = g_malloc0(sizeof(*nic));
 
     nic->support_colo = nic_support_colo;
+    nic->configure = nic_configure;
 
     /*
      * TODO

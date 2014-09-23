@@ -88,6 +88,7 @@ struct NetClientState {
     char colo_script[1024];
     char colo_nicname[128];
     char ifname[128];
+    char ifb[2][128];
     unsigned receive_disabled : 1;
     NetClientDestructor *destructor;
     unsigned int queue_index;

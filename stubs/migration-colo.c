@@ -10,6 +10,7 @@
 
 #include "migration/migration-colo.h"
 #include "qmp-commands.h"
+#include "net/colo-nic.h"
 
 bool colo_supported(void)
 {
@@ -40,4 +41,12 @@ void qmp_colo_lost_heartbeat(Error **errp)
     error_setg(errp, "COLO is not supported, please rerun configure"
                      " with --enable-colo option in order to support"
                      " COLO feature");
+}
+
+void colo_add_nic_devices(NetClientState *nc)
+{
+}
+
+void colo_remove_nic_devices(NetClientState *nc)
+{
 }

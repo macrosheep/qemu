@@ -17,6 +17,7 @@
 #include "migration/migration-colo.h"
 #include <sys/ioctl.h>
 #include "qemu/error-report.h"
+#include "net/colo-nic.h"
 
 /*
  * checkpoint timer: unit ms
@@ -121,6 +122,7 @@ static void ctl_error_handler(void *opaque, int err)
         /* TODO: determine whether we need to failover */
         /* FIXME: we will not failover currently, just kill slave */
         error_report("error: colo transmission failed!");
+        colo_teardown_nic(true);
         exit(1);
     } else if (colo_is_master()) {
         /* Master still alive, do not failover */
@@ -301,6 +303,7 @@ static void *colo_thread(void *opaque)
 
     qdev_hotplug = 0;
 
+    colo_configure_nic(false);
     /*
      * Wait for slave finish loading vm states and enter COLO
      * restore.
@@ -343,6 +346,7 @@ out:
     }
 
     colo_compare_destroy();
+    colo_teardown_nic(false);
 
     migrate_set_state(s, MIG_STATE_COLO, MIG_STATE_COMPLETED);
 
@@ -442,6 +446,7 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
     }
 
     create_and_init_ram_cache();
+    colo_configure_nic(true);
 
     ret = colo_ctl_put(ctl, COLO_READY);
     if (ret) {
@@ -521,6 +526,7 @@ out:
     }
 
     release_ram_cache();
+    colo_teardown_nic(true);
 
     if (ctl) {
         qemu_fclose(ctl);

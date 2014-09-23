@@ -21,11 +21,17 @@ typedef struct nic_device {
 
 QTAILQ_HEAD(, nic_device) nic_devices = QTAILQ_HEAD_INITIALIZER(nic_devices);
 
+static bool nic_support_colo(NetClientState *nc)
+{
+    return nc && nc->colo_script[0] && nc->colo_nicname[0];
+}
+
 void colo_add_nic_devices(NetClientState *nc)
 {
     struct nic_device *nic = g_malloc0(sizeof(*nic));
 
-    /* TODO: init colo function pointers */
+    nic->support_colo = nic_support_colo;
+
     /*
      * TODO
      * only support "-netdev tap,colo_scripte..."  options

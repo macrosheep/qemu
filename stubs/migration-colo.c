@@ -9,6 +9,7 @@
  */
 
 #include "migration/migration-colo.h"
+#include "net/colo-nic.h"
 
 bool colo_supported(void)
 {
@@ -32,4 +33,12 @@ bool colo_is_master(void)
 bool colo_is_slave(void)
 {
     return false;
+}
+
+void colo_add_nic_devices(NetClientState *nc)
+{
+}
+
+void colo_remove_nic_devices(NetClientState *nc)
+{
 }

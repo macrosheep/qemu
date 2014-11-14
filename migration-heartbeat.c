@@ -118,8 +118,8 @@ node_status_update_bh(void *opaque)
                 failover_request_set();
                 colo_do_failover(NULL);
                 /* in slave side, jump to incoming co */
-                if (colo_incoming_co) {
-                    qemu_coroutine_enter(colo_incoming_co, NULL);
+                if (migration_incoming_co) {
+                    qemu_coroutine_enter(migration_incoming_co, NULL);
                 }
             }
         }

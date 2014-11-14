@@ -59,6 +59,7 @@ enum {
 };
 
 static QEMUBH *colo_bh;
+struct colo_incoming *colo_in = NULL;
 
 bool colo_supported(void)
 {
@@ -140,6 +141,19 @@ static int colo_agent_postresume(void)
 }
 
 /* failover */
+static void migration_co_bh(void *opaque)
+{
+    struct colo_incoming *colo_in = opaque;
+    if (!colo_in->bh) {
+        return ;
+    }
+    qemu_bh_delete(colo_in->bh);
+    colo_in->bh = NULL;
+    if (migration_incoming_co) {
+        qemu_coroutine_enter(migration_incoming_co, NULL);
+    }
+}
+
 static bool failover_completed = false;
 void colo_do_failover(MigrationState *s)
 {
@@ -177,6 +191,8 @@ static void ctl_error_handler(void *opaque, int err)
             error_report("failover request from checkpoint channel");
             failover_request_set();
             colo_do_failover(migrate_get_current());
+            colo_in->bh = qemu_bh_new(migration_co_bh, colo_in);
+            qemu_bh_schedule(colo_in->bh);
         }
     } else if (colo_is_master()) {
         /* Master still alive, do not failover */
@@ -468,11 +484,11 @@ void colo_init_checkpointer(MigrationState *s)
 
 /* restore */
 
-Coroutine *colo_incoming_co = NULL;
+Coroutine *colo = NULL;
 
 bool colo_is_slave(void)
 {
-    return colo_incoming_co != NULL;
+    return colo != NULL;
 }
 
 /*
@@ -482,11 +498,8 @@ bool colo_is_slave(void)
  */
 static int slave_wait_new_checkpoint(QEMUFile *f)
 {
-    int fd = qemu_get_fd(f);
     int ret;
     uint64_t cmd;
-
-    yield_until_fd_readable(fd);
 
     ret = colo_ctl_get_value(f, &cmd);
     if (ret) {
@@ -502,8 +515,10 @@ static int slave_wait_new_checkpoint(QEMUFile *f)
     }
 }
 
-void colo_process_incoming_checkpoints(QEMUFile *f)
+void *colo_process_incoming_checkpoints(void *opaque)
 {
+    colo_in = opaque;
+    QEMUFile *f = colo_in->file;
     int fd = qemu_get_fd(f);
     int dev_hotplug = qdev_hotplug;
     QEMUFile *ctl = NULL, *fb = NULL;
@@ -511,13 +526,13 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
     uint64_t total_size;
 
     if (!restore_use_colo()) {
-        return;
+        return NULL;
     }
 
     qdev_hotplug = 0;
 
-    colo_incoming_co = qemu_coroutine_self();
-    assert(colo_incoming_co != NULL);
+    colo = qemu_coroutine_self();
+    assert(colo != NULL);
 
     ctl = qemu_fopen_socket(fd, "wb");
     if (!ctl) {
@@ -559,7 +574,9 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
         /* start colo checkpoint */
 
         /* suspend guest */
+        qemu_mutex_lock_iothread();
         vm_stop_force_state(RUN_STATE_COLO);
+        qemu_mutex_unlock_iothread();
 
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_SUSPENDED);
         if (ret) {
@@ -597,10 +614,13 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
         }
 
         /* load vm state */
+        qemu_mutex_lock_iothread();
         if (qemu_loadvm_state(fb) < 0) {
             error_report("COLO: loadvm failed\n");
+            qemu_mutex_unlock_iothread();
             goto out;
         }
+        qemu_mutex_unlock_iothread();
 
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_LOADED);
         if (ret) {
@@ -608,7 +628,9 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
         }
 
         /* resume guest */
+        qemu_mutex_lock_iothread();
         vm_start();
+        qemu_mutex_unlock_iothread();
 
         qemu_fclose(fb);
         fb = NULL;
@@ -621,7 +643,7 @@ out:
             ;
         }
     }
-    colo_incoming_co = NULL;
+    colo = NULL;
 
     if (fb) {
         qemu_fclose(fb);
@@ -642,5 +664,5 @@ out:
 
     qdev_hotplug = dev_hotplug;
 
-    return;
+    return NULL;
 }

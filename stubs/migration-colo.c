@@ -19,8 +19,9 @@ void colo_init_checkpointer(MigrationState *s)
 {
 }
 
-void colo_process_incoming_checkpoints(QEMUFile *f)
+void *colo_process_incoming_checkpoints(void *opaque)
 {
+    return NULL;
 }
 
 bool colo_is_master(void)

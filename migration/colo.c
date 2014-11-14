@@ -8,15 +8,13 @@
  * later.  See the COPYING file in the top-level directory.
  */
 
-#include "qemu/main-loop.h"
-#include "qemu/thread.h"
-#include "block/coroutine.h"
 #include "hw/qdev-core.h"
 #include "qemu/timer.h"
 #include "sysemu/sysemu.h"
 #include "migration/migration-colo.h"
 #include <sys/ioctl.h>
 #include "qemu/error-report.h"
+#include "migration/migration-failover.h"
 
 /*
  * checkpoint timer: unit ms
@@ -62,6 +60,7 @@ enum {
 
 static QEMUBH *colo_bh;
 struct colo_incoming *colo_in = NULL;
+static bool vmstate_loading = false;
 
 bool colo_supported(void)
 {
@@ -142,18 +141,57 @@ static int colo_agent_postresume(void)
     return ioctl(vm_fd, COMP_IOCTRESUME);
 }
 
+/* failover */
+static bool failover_completed = false;
+
+void colo_do_failover(MigrationState *s)
+{
+    if (colo_is_slave()) {
+        /* Wait for incoming thread loading vmstate */
+        while (vmstate_loading) {
+            ;
+        }
+
+        /* TODO: handle network/block cleanups */
+
+        failover_completed = true;
+        /* On slave side, jump to incoming co */
+        if (migration_incoming_co) {
+            qemu_coroutine_enter(migration_incoming_co, NULL);
+        }
+    } else {
+        /* TODO: handle network/block cleanups */
+
+        failover_completed = true;
+    }
+}
+
 /* colo checkpoint control helper */
 
 static void ctl_error_handler(void *opaque, int err)
 {
     if (colo_is_slave()) {
-        /* TODO: determine whether we need to failover */
-        /* FIXME: we will not failover currently, just kill slave */
-        error_report("error: colo transmission failed!");
-        exit(1);
+        /* determine whether we need to failover */
+        if (!failover_request_is_set()) {
+            /* Wait for heartbeat deadtime, 2 sec for now */
+            usleep(2000 * 1000);
+            if (!failover_request_is_set()) {
+                /*
+                 * We assume that master is still alive according to heartbeat,
+                 * just kill slave
+                 */
+                error_report("error: colo transmission failed!");
+                exit(1);
+            }
+        }
+        /*
+         * OK, master dead, failover will be done by heartbeat channel
+         */
     } else if (colo_is_master()) {
-        /* Master still alive, do not failover */
+        /* Master takeover */
         error_report("error: colo transmission failed!");
+        error_report("master takeover from checkpoint channel");
+        colo_do_failover(migrate_get_current());
         return;
     } else {
         error_report("COLO: Unexpected error happend!");
@@ -245,10 +283,22 @@ static int do_colo_transaction(MigrationState *s, QEMUFile *control)
         goto out;
     }
 
+    if (failover_request_is_set()) {
+        ret = -1;
+        goto out;
+    }
     /* suspend and save vm state to colo buffer */
     qemu_mutex_lock_iothread();
     vm_stop_force_state(RUN_STATE_COLO);
     qemu_mutex_unlock_iothread();
+    /*
+     * heartbeat failover request bh could be called during
+     * vm_stop_force_state so we check failover_request_is_set() again.
+     */
+    if (failover_request_is_set()) {
+        ret = -1;
+        goto out;
+    }
     /* Disable block migration */
     s->params.blk = 0;
     s->params.shared = 0;
@@ -370,6 +420,12 @@ static void *colo_thread(void *opaque)
     }
 
 out:
+    /* if we went here, means slave may dead, we are taking over */
+    if (failover_request_is_set()) {
+        while (!failover_completed) {
+            ;
+        }
+    }
 
     if (colo_buffer) {
         qsb_free(colo_buffer);
@@ -496,6 +552,11 @@ void *colo_process_incoming_checkpoints(void *opaque)
             break;
         }
 
+        if (failover_request_is_set()) {
+            error_report("failover request from heartbeat channel");
+            goto out;
+        }
+
         /* start colo checkpoint */
 
         /* suspend guest */
@@ -540,11 +601,14 @@ void *colo_process_incoming_checkpoints(void *opaque)
 
         /* load vm state */
         qemu_mutex_lock_iothread();
+        vmstate_loading = true;
         if (qemu_loadvm_state(fb) < 0) {
             error_report("COLO: loadvm failed\n");
+            vmstate_loading = false;
             qemu_mutex_unlock_iothread();
             goto out;
         }
+        vmstate_loading = false;
         qemu_mutex_unlock_iothread();
 
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_LOADED);
@@ -562,6 +626,12 @@ void *colo_process_incoming_checkpoints(void *opaque)
     }
 
 out:
+    /* if we went here, means master may dead, we are doing failover */
+    if (failover_request_is_set()) {
+        while (!failover_completed) {
+            ;
+        }
+    }
     colo = NULL;
 
     if (fb) {

@@ -8,15 +8,13 @@
  * the COPYING file in the top-level directory.
  */
 
-#include "qemu/main-loop.h"
-#include "qemu/thread.h"
-#include "block/coroutine.h"
 #include "hw/qdev-core.h"
 #include "qemu/timer.h"
 #include "sysemu/sysemu.h"
 #include "migration/migration-colo.h"
 #include <sys/ioctl.h>
 #include "qemu/error-report.h"
+#include "migration/migration-failover.h"
 
 /*
  * checkpoint timer: unit ms
@@ -113,18 +111,50 @@ static int colo_compare_resume(void)
     return 0;
 }
 
+/* failover */
+static bool failover_completed = false;
+void colo_do_failover(MigrationState *s)
+{
+    if (colo_is_slave()) {
+        /* TODO: handle network/block cleanups */
+    } else {
+        /* TODO: handle network/block cleanups */
+    }
+    failover_completed = true;
+}
+
 /* colo checkpoint control helper */
 
 static void ctl_error_handler(void *opaque, int err)
 {
     if (colo_is_slave()) {
-        /* TODO: determine whether we need to failover */
-        /* FIXME: we will not failover currently, just kill slave */
-        error_report("error: colo transmission failed!");
-        exit(1);
+        /* determine whether we need to failover */
+        if (!failover_request_is_set() && get_heartbeat(COLO_SIDE_MASTER)) {
+            /* Wait for heartbeat deadtime */
+            usleep((heartbeat_deadtime() + 100) * 1000);
+            if (get_heartbeat(COLO_SIDE_MASTER)) {
+                /*
+                 * We assume that master is still alive according to heartbeat,
+                 * just kill slave
+                 */
+                error_report("error: colo transmission failed!");
+                exit(1);
+            }
+        }
+        /*
+         * OK, master dead, check failover request again, because failover
+         * request may be set by heartbeat channel
+         */
+        if (!failover_request_is_set()) {
+            error_report("failover request from checkpoint channel");
+            failover_request_set();
+            colo_do_failover(migrate_get_current());
+        }
     } else if (colo_is_master()) {
         /* Master still alive, do not failover */
         error_report("error: colo transmission failed!");
+        error_report("master takeover from checkpoint channel");
+        colo_do_failover(migrate_get_current());
         return;
     } else {
         error_report("COLO: Unexpected error happend!");
@@ -216,15 +246,29 @@ static int do_colo_transaction(MigrationState *s, QEMUFile *control)
         goto out;
     }
 
+    if (failover_request_is_set()) {
+        ret = -1;
+        goto out;
+    }
     /* suspend and save vm state to colo buffer */
     qemu_mutex_lock_iothread();
     vm_stop_force_state(RUN_STATE_COLO);
     qemu_mutex_unlock_iothread();
+    /*
+     * heartbeat failover request bh could be called during
+     * vm_stop_force_state so we check failover_request_is_set() again.
+     */
+    if (failover_request_is_set()) {
+        ret = -1;
+        goto out;
+    }
     /* Disable block migration */
     s->params.blk = 0;
     s->params.shared = 0;
+    qemu_mutex_lock_iothread();
     qemu_savevm_state_begin(trans, &s->params);
     qemu_savevm_state_complete(trans);
+    qemu_mutex_unlock_iothread();
 
     qemu_fflush(trans);
 
@@ -288,6 +332,11 @@ static void *colo_thread(void *opaque)
     QEMUFile *colo_control = NULL;
     int ret;
 
+    if (register_heartbeat_client()) {
+        error_report("register heartbeat failed\n");
+        goto out;
+    }
+
     if (colo_compare_init() < 0) {
         error_report("Init colo compare error");
         goto out;
@@ -338,10 +387,18 @@ static void *colo_thread(void *opaque)
     }
 
 out:
+    /* if we went here, means slave may dead, we are taking over */
+    if (failover_request_is_set()) {
+        while (!failover_completed) {
+            ;
+        }
+    }
+
     if (colo_control) {
         qemu_fclose(colo_control);
     }
 
+    unregister_heartbeat_client();
     colo_compare_destroy();
 
     migrate_set_state(s, MIG_STATE_COLO, MIG_STATE_COMPLETED);
@@ -382,11 +439,11 @@ void colo_init_checkpointer(MigrationState *s)
 
 /* restore */
 
-static Coroutine *colo;
+Coroutine *colo_incoming_co = NULL;
 
 bool colo_is_slave(void)
 {
-    return colo != NULL;
+    return colo_incoming_co != NULL;
 }
 
 /*
@@ -432,8 +489,8 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
 
     qdev_hotplug = 0;
 
-    colo = qemu_coroutine_self();
-    assert(colo != NULL);
+    colo_incoming_co = qemu_coroutine_self();
+    assert(colo_incoming_co != NULL);
 
     ctl = qemu_fopen_socket(fd, "wb");
     if (!ctl) {
@@ -442,6 +499,11 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
     }
 
     create_and_init_ram_cache();
+
+    if (register_heartbeat_client()) {
+        error_report("register heartbeat failed\n");
+        goto out;
+    }
 
     ret = colo_ctl_put(ctl, COLO_READY);
     if (ret) {
@@ -454,6 +516,11 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
     while (true) {
         if (slave_wait_new_checkpoint(f)) {
             break;
+        }
+
+        if (failover_request_is_set()) {
+            error_report("failover request from heartbeat channel");
+            goto out;
         }
 
         /* start colo checkpoint */
@@ -514,13 +581,20 @@ void colo_process_incoming_checkpoints(QEMUFile *f)
     }
 
 out:
-    colo = NULL;
+    /* if we went here, means master may dead, we are taking over */
+    if (failover_request_is_set()) {
+        while (!failover_completed) {
+            ;
+        }
+    }
+    colo_incoming_co = NULL;
 
     if (fb) {
         qemu_fclose(fb);
     }
 
     release_ram_cache();
+    unregister_heartbeat_client();
 
     if (ctl) {
         qemu_fclose(ctl);

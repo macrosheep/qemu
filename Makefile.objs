@@ -50,7 +50,8 @@ common-obj-$(CONFIG_LINUX) += fsdev/
 
 common-obj-y += migration.o migration-tcp.o
 common-obj-y += migration-colo-comm.o
-common-obj-$(CONFIG_COLO) += migration-colo.o
+common-obj-$(CONFIG_COLO) += migration-colo.o migration-failover.o
+common-obj-$(CONFIG_COLO) += migration-heartbeat.o
 common-obj-y += vmstate.o
 common-obj-y += qemu-file.o qemu-file-unix.o qemu-file-stdio.o
 common-obj-$(CONFIG_RDMA) += migration-rdma.o

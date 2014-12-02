@@ -887,6 +887,7 @@ static int find_and_clear_dirty_height(struct VncState *vs,
 
 static int vnc_update_client(VncState *vs, int has_dirty, bool sync)
 {
+    vs->has_dirty += has_dirty;
     if (vs->need_update && vs->csock != -1) {
         VncDisplay *vd = vs->vd;
         VncJob *job;
@@ -898,7 +899,7 @@ static int vnc_update_client(VncState *vs, int has_dirty, bool sync)
             /* kernel send buffers are full -> drop frames to throttle */
             return 0;
 
-        if (!has_dirty && !vs->audio_cap && !vs->force_update)
+        if (!vs->has_dirty && !vs->audio_cap && !vs->force_update)
             return 0;
 
         /*
@@ -941,6 +942,7 @@ static int vnc_update_client(VncState *vs, int has_dirty, bool sync)
             vnc_jobs_join(vs);
         }
         vs->force_update = 0;
+        vs->has_dirty = 0;
         return n;
     }
 
@@ -1878,6 +1880,7 @@ static void framebuffer_update_request(VncState *vs, int incremental,
         return;
     }
 
+    vs->force_update = 1;
     vnc_set_area_dirty(vs->dirty, width, height, x, y, w, h);
 }
 
@@ -2019,6 +2022,16 @@ static void set_pixel_format(VncState *vs,
                              int red_shift, int green_shift, int blue_shift)
 {
     if (!true_color_flag) {
+        vnc_client_error(vs);
+        return;
+    }
+
+    switch (bits_per_pixel) {
+    case 8:
+    case 16:
+    case 32:
+        break;
+    default:
         vnc_client_error(vs);
         return;
     }
@@ -2765,6 +2778,11 @@ static void vnc_refresh(DisplayChangeListener *dcl)
     VncState *vs, *vn;
     int has_dirty, rects = 0;
 
+    if (QTAILQ_EMPTY(&vd->clients)) {
+        update_displaychangelistener(&vd->dcl, VNC_REFRESH_INTERVAL_MAX);
+        return;
+    }
+
     graphic_hw_update(NULL);
 
     if (vnc_trylock_display(vd)) {
@@ -2778,11 +2796,6 @@ static void vnc_refresh(DisplayChangeListener *dcl)
     QTAILQ_FOREACH_SAFE(vs, &vd->clients, next, vn) {
         rects += vnc_update_client(vs, has_dirty, false);
         /* vs might be free()ed here */
-    }
-
-    if (QTAILQ_EMPTY(&vd->clients)) {
-        update_displaychangelistener(&vd->dcl, VNC_REFRESH_INTERVAL_MAX);
-        return;
     }
 
     if (has_dirty && rects) {
@@ -2911,6 +2924,7 @@ static void vnc_listen_read(void *opaque, bool websocket)
     }
 
     if (csock != -1) {
+        socket_set_nodelay(csock);
         vnc_connect(vs, csock, false, websocket);
     }
 }

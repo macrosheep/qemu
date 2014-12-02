@@ -83,7 +83,6 @@ typedef struct PIIX4PMState {
     uint8_t s4_val;
 
     AcpiCpuHotplug gpe_cpu;
-    Notifier cpu_added_notifier;
 
     MemHotplugState acpi_memory_hotplug;
 } PIIX4PMState;
@@ -348,14 +347,16 @@ static void piix4_device_plug_cb(HotplugHandler *hotplug_dev,
     } else if (object_dynamic_cast(OBJECT(dev), TYPE_PCI_DEVICE)) {
         acpi_pcihp_device_plug_cb(&s->ar, s->irq, &s->acpi_pci_hotplug, dev,
                                   errp);
+    } else if (object_dynamic_cast(OBJECT(dev), TYPE_CPU)) {
+        acpi_cpu_plug_cb(&s->ar, s->irq, &s->gpe_cpu, dev, errp);
     } else {
         error_setg(errp, "acpi: device plug request for not supported device"
                    " type: %s", object_get_typename(OBJECT(dev)));
     }
 }
 
-static void piix4_device_unplug_cb(HotplugHandler *hotplug_dev,
-                                   DeviceState *dev, Error **errp)
+static void piix4_device_unplug_request_cb(HotplugHandler *hotplug_dev,
+                                           DeviceState *dev, Error **errp)
 {
     PIIX4PMState *s = PIIX4_PM(hotplug_dev);
 
@@ -544,15 +545,6 @@ static const MemoryRegionOps piix4_gpe_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
-static void piix4_cpu_added_req(Notifier *n, void *opaque)
-{
-    PIIX4PMState *s = container_of(n, PIIX4PMState, cpu_added_notifier);
-
-    assert(s != NULL);
-    AcpiCpuHotplug_add(&s->ar.gpe, &s->gpe_cpu, CPU(opaque));
-    acpi_update_sci(&s->ar, s->irq);
-}
-
 static void piix4_acpi_system_hot_add_init(MemoryRegion *parent,
                                            PCIBus *bus, PIIX4PMState *s)
 {
@@ -563,10 +555,8 @@ static void piix4_acpi_system_hot_add_init(MemoryRegion *parent,
     acpi_pcihp_init(&s->acpi_pci_hotplug, bus, parent,
                     s->use_acpi_pci_hotplug);
 
-    AcpiCpuHotplug_init(parent, OBJECT(s), &s->gpe_cpu,
-                        PIIX4_CPU_HOTPLUG_IO_BASE);
-    s->cpu_added_notifier.notify = piix4_cpu_added_req;
-    qemu_register_cpu_added_notifier(&s->cpu_added_notifier);
+    acpi_cpu_hotplug_init(parent, OBJECT(s), &s->gpe_cpu,
+                          PIIX4_CPU_HOTPLUG_IO_BASE);
 
     if (s->acpi_memory_hotplug.is_enabled) {
         acpi_memory_hotplug_init(parent, OBJECT(s), &s->acpi_memory_hotplug);
@@ -615,7 +605,7 @@ static void piix4_pm_class_init(ObjectClass *klass, void *data)
     dc->cannot_instantiate_with_device_add_yet = true;
     dc->hotpluggable = false;
     hc->plug = piix4_device_plug_cb;
-    hc->unplug = piix4_device_unplug_cb;
+    hc->unplug_request = piix4_device_unplug_request_cb;
     adevc->ospm_status = piix4_ospm_status;
 }
 

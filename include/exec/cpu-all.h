@@ -198,6 +198,8 @@ extern unsigned long reserved_va;
 #define RESERVED_VA 0ul
 #endif
 
+#define GUEST_ADDR_MAX (RESERVED_VA ? RESERVED_VA : \
+                                    (1ul << TARGET_VIRT_ADDR_SPACE_BITS) - 1)
 #endif
 
 /* page related stuff */
@@ -230,8 +232,8 @@ extern uintptr_t qemu_host_page_mask;
 #if defined(CONFIG_USER_ONLY)
 void page_dump(FILE *f);
 
-typedef int (*walk_memory_regions_fn)(void *, abi_ulong,
-                                      abi_ulong, unsigned long);
+typedef int (*walk_memory_regions_fn)(void *, target_ulong,
+                                      target_ulong, unsigned long);
 int walk_memory_regions(void *, walk_memory_regions_fn);
 
 int page_get_flags(target_ulong address);
@@ -300,6 +302,7 @@ CPUArchState *cpu_copy(CPUArchState *env);
 typedef struct RAMBlock {
     struct MemoryRegion *mr;
     uint8_t *host;
+    uint8_t *host_cache;
     ram_addr_t offset;
     ram_addr_t length;
     uint32_t flags;

@@ -11,6 +11,9 @@
 # QAPI event definitions
 { 'include': 'qapi/event.json' }
 
+# Tracing commands
+{ 'include': 'qapi/trace.json' }
+
 ##
 # LostTickPolicy:
 #
@@ -145,12 +148,15 @@
 # @watchdog: the watchdog action is configured to pause and has been triggered
 #
 # @guest-panicked: guest has been panicked as a result of guest OS panic
+#
+# @colo: guest is paused to save/restore VM state under colo checkpoint (since
+# 2.2)
 ##
 { 'enum': 'RunState',
   'data': [ 'debug', 'inmigrate', 'internal-error', 'io-error', 'paused',
             'postmigrate', 'prelaunch', 'finish-migrate', 'restore-vm',
             'running', 'save-vm', 'shutdown', 'suspended', 'watchdog',
-            'guest-panicked' ] }
+            'guest-panicked', 'colo' ] }
 
 ##
 # @StatusInfo:
@@ -491,10 +497,13 @@
 # @auto-converge: If enabled, QEMU will automatically throttle down the guest
 #          to speed up convergence of RAM migration. (since 1.6)
 #
+# @colo: If enabled, the migration will never end, and the VM will instead be
+#          continuously checkpointed. (since 2.2)
+#
 # Since: 1.2
 ##
 { 'enum': 'MigrationCapability',
-  'data': ['xbzrle', 'rdma-pin-all', 'auto-converge', 'zero-blocks'] }
+  'data': ['xbzrle', 'rdma-pin-all', 'auto-converge', 'zero-blocks', 'colo'] }
 
 ##
 # @MigrationCapabilityStatus
@@ -1186,13 +1195,13 @@
 ##
 # @inject-nmi:
 #
-# Injects an Non-Maskable Interrupt into all guest's VCPUs.
+# Injects a Non-Maskable Interrupt into the default CPU (x86/s390) or all CPUs (ppc64).
 #
 # Returns:  If successful, nothing
 #
 # Since:  0.14.0
 #
-# Notes: Only x86 Virtual Machines support this command.
+# Note: prior to 2.1, this command was only supported for x86 and s390 VMs
 ##
 { 'command': 'inject-nmi' }
 
@@ -1612,11 +1621,13 @@
 #
 # @name: the name of the property
 # @type: the typename of the property
+# @description: #optional if specified, the description of the property.
+#               (since 2.2)
 #
 # Since: 1.2
 ##
 { 'type': 'DevicePropertyInfo',
-  'data': { 'name': 'str', 'type': 'str' } }
+  'data': { 'name': 'str', 'type': 'str', '*description': 'str' } }
 
 ##
 # @device-list-properties:
@@ -2648,14 +2659,19 @@
 # @nodelay: #optional set TCP_NODELAY socket option (default: false)
 # @telnet: #optional enable telnet protocol on server
 #          sockets (default: false)
+# @reconnect: #optional For a client socket, if a socket is disconnected,
+#          then attempt a reconnect after the given number of seconds.
+#          Setting this to zero disables this function. (default: 0)
+#          (Since: 2.2)
 #
 # Since: 1.4
 ##
-{ 'type': 'ChardevSocket', 'data': { 'addr'     : 'SocketAddress',
-                                     '*server'  : 'bool',
-                                     '*wait'    : 'bool',
-                                     '*nodelay' : 'bool',
-                                     '*telnet'  : 'bool' } }
+{ 'type': 'ChardevSocket', 'data': { 'addr'       : 'SocketAddress',
+                                     '*server'    : 'bool',
+                                     '*wait'      : 'bool',
+                                     '*nodelay'   : 'bool',
+                                     '*telnet'    : 'bool',
+                                     '*reconnect' : 'int' } }
 
 ##
 # @ChardevUdp:
@@ -2749,7 +2765,7 @@
 #
 # Configuration info for the new chardev backend.
 #
-# Since: 1.4
+# Since: 1.4 (testdev since 2.2)
 ##
 { 'type': 'ChardevDummy', 'data': { } }
 
@@ -2764,6 +2780,7 @@
                                        'mux'    : 'ChardevMux',
                                        'msmouse': 'ChardevDummy',
                                        'braille': 'ChardevDummy',
+                                       'testdev': 'ChardevDummy',
                                        'stdio'  : 'ChardevStdio',
                                        'console': 'ChardevDummy',
                                        'spicevmc' : 'ChardevSpiceChannel',
@@ -3227,6 +3244,23 @@
               'btn'     : 'InputBtnEvent',
               'rel'     : 'InputMoveEvent',
               'abs'     : 'InputMoveEvent' } }
+
+##
+# @input-send-event
+#
+# Send input event(s) to guest.
+#
+# @console: Which console to send event(s) to.
+#
+# @events: List of InputEvent union.
+#
+# Returns: Nothing on success.
+#
+# Since: 2.2
+#
+##
+{ 'command': 'input-send-event',
+  'data': { 'console':'int', 'events': [ 'InputEvent' ] } }
 
 ##
 # @NumaOptions

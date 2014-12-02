@@ -52,6 +52,7 @@
 #include "exec/ram_addr.h"
 #include "hw/acpi/acpi.h"
 #include "qemu/host-utils.h"
+#include "migration/migration-colo.h"
 
 #ifdef DEBUG_ARCH_INIT
 #define DPRINTF(fmt, ...) \
@@ -104,6 +105,8 @@ int graphic_depth = 32;
 #define QEMU_ARCH QEMU_ARCH_XTENSA
 #elif defined(TARGET_UNICORE32)
 #define QEMU_ARCH QEMU_ARCH_UNICORE32
+#elif defined(TARGET_TRICORE)
+#define QEMU_ARCH QEMU_ARCH_TRICORE
 #endif
 
 const uint32_t arch_type = QEMU_ARCH;
@@ -769,6 +772,15 @@ static int ram_save_setup(QEMUFile *f, void *opaque)
     RAMBlock *block;
     int64_t ram_bitmap_pages; /* Size of bitmap in pages, including gaps */
 
+    /*
+     * migration has already setup the bitmap, reuse it.
+     */
+    if (colo_is_master()) {
+        qemu_mutex_lock_ramlist();
+        reset_ram_globals();
+        goto out_setup;
+    }
+
     mig_throttle_on = false;
     dirty_rate_high_cnt = 0;
     bitmap_sync_count = 0;
@@ -828,6 +840,7 @@ static int ram_save_setup(QEMUFile *f, void *opaque)
     migration_bitmap_sync();
     qemu_mutex_unlock_iothread();
 
+out_setup:
     qemu_put_be64(f, ram_bytes_total() | RAM_SAVE_FLAG_MEM_SIZE);
 
     QTAILQ_FOREACH(block, &ram_list.blocks, next) {
@@ -937,7 +950,14 @@ static int ram_save_complete(QEMUFile *f, void *opaque)
     }
 
     ram_control_after_iterate(f, RAM_CONTROL_FINISH);
-    migration_end();
+
+    /*
+     * Since we need to reuse dirty bitmap in colo,
+     * don't cleanup the bitmap.
+     */
+    if (!migrate_use_colo() || migration_has_failed(migrate_get_current())) {
+        migration_end();
+    }
 
     qemu_mutex_unlock_ramlist();
     qemu_put_be64(f, RAM_SAVE_FLAG_EOS);
@@ -995,6 +1015,7 @@ static int load_xbzrle(QEMUFile *f, ram_addr_t addr, void *host)
     return 0;
 }
 
+static void *memory_region_get_ram_cache_ptr(MemoryRegion *mr, RAMBlock *block);
 static inline void *host_from_stream_offset(QEMUFile *f,
                                             ram_addr_t offset,
                                             int flags)
@@ -1009,7 +1030,12 @@ static inline void *host_from_stream_offset(QEMUFile *f,
             return NULL;
         }
 
-        return memory_region_get_ram_ptr(block->mr) + offset;
+        if (colo_is_slave()) {
+            migration_bitmap_set_dirty(block->mr->ram_addr + offset);
+            return memory_region_get_ram_cache_ptr(block->mr, block) + offset;
+        } else {
+            return memory_region_get_ram_ptr(block->mr) + offset;
+        }
     }
 
     len = qemu_get_byte(f);
@@ -1017,8 +1043,15 @@ static inline void *host_from_stream_offset(QEMUFile *f,
     id[len] = 0;
 
     QTAILQ_FOREACH(block, &ram_list.blocks, next) {
-        if (!strncmp(id, block->idstr, sizeof(id)))
-            return memory_region_get_ram_ptr(block->mr) + offset;
+        if (!strncmp(id, block->idstr, sizeof(id))) {
+            if (colo_is_slave()) {
+                migration_bitmap_set_dirty(block->mr->ram_addr + offset);
+                return memory_region_get_ram_cache_ptr(block->mr, block)
+                       + offset;
+            } else {
+                return memory_region_get_ram_ptr(block->mr) + offset;
+            }
+        }
     }
 
     error_report("Can't find block %s!", id);
@@ -1036,11 +1069,12 @@ void ram_handle_compressed(void *host, uint8_t ch, uint64_t size)
     }
 }
 
+static void ram_flush_cache(void);
 static int ram_load(QEMUFile *f, void *opaque, int version_id)
 {
-    ram_addr_t addr;
-    int flags, ret = 0;
+    int flags = 0, ret = 0;
     static uint64_t seq_iter;
+    bool need_flush = false;
 
     seq_iter++;
 
@@ -1048,21 +1082,24 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
         ret = -EINVAL;
     }
 
-    while (!ret) {
-        addr = qemu_get_be64(f);
+    while (!ret && !(flags & RAM_SAVE_FLAG_EOS)) {
+        ram_addr_t addr, total_ram_bytes;
+        void *host;
+        uint8_t ch;
 
+        addr = qemu_get_be64(f);
         flags = addr & ~TARGET_PAGE_MASK;
         addr &= TARGET_PAGE_MASK;
 
-        if (flags & RAM_SAVE_FLAG_MEM_SIZE) {
+        switch (flags & ~RAM_SAVE_FLAG_CONTINUE) {
+        case RAM_SAVE_FLAG_MEM_SIZE:
             /* Synchronize RAM block list */
-            char id[256];
-            ram_addr_t length;
-            ram_addr_t total_ram_bytes = addr;
-
-            while (total_ram_bytes) {
+            total_ram_bytes = addr;
+            while (!ret && total_ram_bytes) {
                 RAMBlock *block;
                 uint8_t len;
+                char id[256];
+                ram_addr_t length;
 
                 len = qemu_get_byte(f);
                 qemu_get_buffer(f, (uint8_t *)id, len);
@@ -1072,8 +1109,8 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
                 QTAILQ_FOREACH(block, &ram_list.blocks, next) {
                     if (!strncmp(id, block->idstr, sizeof(id))) {
                         if (block->length != length) {
-                            error_report("Length mismatch: %s: " RAM_ADDR_FMT
-                                         " in != " RAM_ADDR_FMT, id, length,
+                            error_report("Length mismatch: %s: 0x" RAM_ADDR_FMT
+                                         " in != 0x" RAM_ADDR_FMT, id, length,
                                          block->length);
                             ret =  -EINVAL;
                         }
@@ -1086,16 +1123,11 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
                                  "accept migration", id);
                     ret = -EINVAL;
                 }
-                if (ret) {
-                    break;
-                }
 
                 total_ram_bytes -= length;
             }
-        } else if (flags & RAM_SAVE_FLAG_COMPRESS) {
-            void *host;
-            uint8_t ch;
-
+            break;
+        case RAM_SAVE_FLAG_COMPRESS:
             host = host_from_stream_offset(f, addr, flags);
             if (!host) {
                 error_report("Illegal RAM offset " RAM_ADDR_FMT, addr);
@@ -1103,11 +1135,11 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
                 break;
             }
 
+            need_flush = true;
             ch = qemu_get_byte(f);
             ram_handle_compressed(host, ch, TARGET_PAGE_SIZE);
-        } else if (flags & RAM_SAVE_FLAG_PAGE) {
-            void *host;
-
+            break;
+        case RAM_SAVE_FLAG_PAGE:
             host = host_from_stream_offset(f, addr, flags);
             if (!host) {
                 error_report("Illegal RAM offset " RAM_ADDR_FMT, addr);
@@ -1115,9 +1147,11 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
                 break;
             }
 
+            need_flush = true;
             qemu_get_buffer(f, host, TARGET_PAGE_SIZE);
-        } else if (flags & RAM_SAVE_FLAG_XBZRLE) {
-            void *host = host_from_stream_offset(f, addr, flags);
+            break;
+        case RAM_SAVE_FLAG_XBZRLE:
+            host = host_from_stream_offset(f, addr, flags);
             if (!host) {
                 error_report("Illegal RAM offset " RAM_ADDR_FMT, addr);
                 ret = -EINVAL;
@@ -1130,22 +1164,158 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
                 ret = -EINVAL;
                 break;
             }
-        } else if (flags & RAM_SAVE_FLAG_HOOK) {
-            ram_control_load_hook(f, flags);
-        } else if (flags & RAM_SAVE_FLAG_EOS) {
+            need_flush = true;
+            break;
+        case RAM_SAVE_FLAG_EOS:
             /* normal exit */
             break;
-        } else {
-            error_report("Unknown migration flags: %#x", flags);
-            ret = -EINVAL;
-            break;
+        default:
+            if (flags & RAM_SAVE_FLAG_HOOK) {
+                ram_control_load_hook(f, flags);
+            } else {
+                error_report("Unknown combination of migration flags: %#x",
+                             flags);
+                ret = -EINVAL;
+            }
         }
-        ret = qemu_file_get_error(f);
+        if (!ret) {
+            ret = qemu_file_get_error(f);
+        }
+    }
+
+    if (!ret && colo_is_slave() && need_flush) {
+        ram_flush_cache();
     }
 
     DPRINTF("Completed load of VM with exit code %d seq iteration "
             "%" PRIu64 "\n", ret, seq_iter);
     return ret;
+}
+
+/*
+ * colo cache: this is for secondary VM, we cache the whole
+ * memory of the secondary VM.
+ */
+void create_and_init_ram_cache(void)
+{
+    /*
+     * called after first migration
+     */
+    RAMBlock *block;
+    int64_t ram_cache_pages = last_ram_offset() >> TARGET_PAGE_BITS;
+
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
+        block->host_cache = g_malloc(block->length);
+        memcpy(block->host_cache, block->host, block->length);
+    }
+
+    migration_bitmap = bitmap_new(ram_cache_pages);
+    migration_dirty_pages = 0;
+    memory_global_dirty_log_start();
+}
+
+void release_ram_cache(void)
+{
+    RAMBlock *block;
+
+    if (migration_bitmap) {
+        memory_global_dirty_log_stop();
+        g_free(migration_bitmap);
+        migration_bitmap = NULL;
+    }
+
+    QTAILQ_FOREACH(block, &ram_list.blocks, next) {
+        g_free(block->host_cache);
+    }
+}
+
+static void *memory_region_get_ram_cache_ptr(MemoryRegion *mr, RAMBlock *block)
+{
+   if (mr->alias) {
+        return memory_region_get_ram_cache_ptr(mr->alias, block) +
+               mr->alias_offset;
+    }
+
+    assert(mr->terminates);
+
+    ram_addr_t addr = mr->ram_addr & TARGET_PAGE_MASK;
+
+    assert(addr - block->offset < block->length);
+
+    return block->host_cache + (addr - block->offset);
+}
+
+static inline
+ram_addr_t host_bitmap_find_and_reset_dirty(MemoryRegion *mr,
+                                                 ram_addr_t start)
+{
+    unsigned long base = mr->ram_addr >> TARGET_PAGE_BITS;
+    unsigned long nr = base + (start >> TARGET_PAGE_BITS);
+    unsigned long size = base + (int128_get64(mr->size) >> TARGET_PAGE_BITS);
+
+    unsigned long next;
+
+    next = find_next_bit(ram_list.dirty_memory[DIRTY_MEMORY_MIGRATION],
+                         size, nr);
+    if (next < size) {
+        clear_bit(next, ram_list.dirty_memory[DIRTY_MEMORY_MIGRATION]);
+    }
+    return (next - base) << TARGET_PAGE_BITS;
+}
+
+static void ram_flush_cache(void)
+{
+    RAMBlock *block = NULL;
+    void *dst_host;
+    void *src_host;
+    ram_addr_t ca  = 0, ha = 0;
+    bool got_ca = 0, got_ha = 0;
+    int64_t host_dirty = 0, both_dirty = 0;
+
+    address_space_sync_dirty_bitmap(&address_space_memory);
+
+    block = QTAILQ_FIRST(&ram_list.blocks);
+    while (true) {
+        if (ca < block->length && ca <= ha) {
+            ca = migration_bitmap_find_and_reset_dirty(block->mr, ca);
+            if (ca < block->length) {
+                got_ca = 1;
+            }
+        }
+        if (ha < block->length && ha <= ca) {
+            ha = host_bitmap_find_and_reset_dirty(block->mr, ha);
+            if (ha < block->length && ha != ca) {
+                got_ha = 1;
+            }
+            host_dirty += (ha < block->length ? 1 : 0);
+            both_dirty += (ha < block->length && ha == ca ? 1 : 0);
+        }
+        if (ca >= block->length && ha >= block->length) {
+            ca = 0;
+            ha = 0;
+            block = QTAILQ_NEXT(block, next);
+            if (!block) {
+                break;
+            }
+        } else {
+            if (got_ha) {
+                got_ha = 0;
+                dst_host = memory_region_get_ram_ptr(block->mr) + ha;
+                src_host = memory_region_get_ram_cache_ptr(block->mr, block)
+                           + ha;
+                memcpy(dst_host, src_host, TARGET_PAGE_SIZE);
+            }
+            if (got_ca) {
+                got_ca = 0;
+                dst_host = memory_region_get_ram_ptr(block->mr) + ca;
+                src_host = memory_region_get_ram_cache_ptr(block->mr, block)
+                           + ca;
+                memcpy(dst_host, src_host, TARGET_PAGE_SIZE);
+            }
+        }
+    }
+
+    assert(migration_dirty_pages == 0);
 }
 
 static SaveVMHandlers savevm_ram_handlers = {
@@ -1333,11 +1503,6 @@ void cpudef_init(void)
 #if defined(cpudef_setup)
     cpudef_setup(); /* parse cpu definitions in target config file */
 #endif
-}
-
-int tcg_available(void)
-{
-    return 1;
 }
 
 int kvm_available(void)

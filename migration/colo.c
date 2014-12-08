@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include "qemu/error-report.h"
 #include "migration/migration-failover.h"
+#include "net/colo-nic.h"
 
 /*
  * checkpoint timer: unit ms
@@ -152,7 +153,8 @@ void colo_do_failover(MigrationState *s)
             ;
         }
 
-        /* TODO: handle network/block cleanups */
+        /* TODO: handle block cleanups */
+        colo_teardown_nic(true);
 
         failover_completed = true;
         /* On slave side, jump to incoming co */
@@ -160,7 +162,8 @@ void colo_do_failover(MigrationState *s)
             qemu_coroutine_enter(migration_incoming_co, NULL);
         }
     } else {
-        /* TODO: handle network/block cleanups */
+        /* TODO: handle block cleanups */
+        colo_teardown_nic(false);
 
         failover_completed = true;
     }
@@ -181,6 +184,7 @@ static void ctl_error_handler(void *opaque, int err)
                  * just kill slave
                  */
                 error_report("error: colo transmission failed!");
+                colo_teardown_nic(true);
                 exit(1);
             }
         }
@@ -368,6 +372,8 @@ static void *colo_thread(void *opaque)
     QEMUFile *colo_control = NULL;
     int ret;
 
+    colo_configure_nic(false);
+
     if (colo_agent_init() < 0) {
         error_report("Init colo agent error");
         goto out;
@@ -441,6 +447,7 @@ out:
     }
 
     colo_agent_teardown();
+    colo_teardown_nic(false);
 
     migrate_set_state(s, MIG_STATE_COLO, MIG_STATE_COMPLETED);
 
@@ -537,6 +544,7 @@ void *colo_process_incoming_checkpoints(void *opaque)
     }
 
     create_and_init_ram_cache();
+    colo_configure_nic(true);
 
     ret = colo_ctl_put(ctl, COLO_READY);
     if (ret) {
@@ -644,6 +652,7 @@ out:
     }
 
     release_ram_cache();
+    colo_teardown_nic(true);
 
     if (ctl) {
         qemu_fclose(ctl);

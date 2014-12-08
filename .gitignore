@@ -52,6 +52,7 @@
 /qemu-io
 /qemu-ga
 /qemu-bridge-helper
+/colo-tc
 /qemu-monitor.texi
 /qmp-commands.txt
 /vscclient

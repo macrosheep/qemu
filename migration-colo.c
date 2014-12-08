@@ -15,6 +15,7 @@
 #include <sys/ioctl.h>
 #include "qemu/error-report.h"
 #include "migration/migration-failover.h"
+#include "net/colo-nic.h"
 
 /*
  * checkpoint timer: unit ms
@@ -158,9 +159,11 @@ static bool failover_completed = false;
 void colo_do_failover(MigrationState *s)
 {
     if (colo_is_slave()) {
-        /* TODO: handle network/block cleanups */
+        /* TODO: handle block cleanups */
+        colo_teardown_nic(true);
     } else {
-        /* TODO: handle network/block cleanups */
+        /* TODO: handle block cleanups */
+        colo_teardown_nic(false);
     }
     failover_completed = true;
 }
@@ -180,6 +183,7 @@ static void ctl_error_handler(void *opaque, int err)
                  * just kill slave
                  */
                 error_report("error: colo transmission failed!");
+                colo_teardown_nic(true);
                 exit(1);
             }
         }
@@ -380,6 +384,8 @@ static void *colo_thread(void *opaque)
         goto out;
     }
 
+    colo_configure_nic(false);
+
     if (colo_agent_init() < 0) {
         error_report("Init colo agent error");
         goto out;
@@ -449,6 +455,7 @@ out:
 
     unregister_heartbeat_client();
     colo_agent_teardown();
+    colo_teardown_nic(false);
 
     migrate_set_state(s, MIG_STATE_COLO, MIG_STATE_COMPLETED);
 
@@ -545,6 +552,7 @@ void *colo_process_incoming_checkpoints(void *opaque)
     }
 
     create_and_init_ram_cache();
+    colo_configure_nic(true);
 
     if (register_heartbeat_client()) {
         error_report("register heartbeat failed\n");
@@ -655,6 +663,7 @@ out:
 
     release_ram_cache();
     unregister_heartbeat_client();
+    colo_teardown_nic(true);
 
     if (ctl) {
         qemu_fclose(ctl);

@@ -258,7 +258,7 @@ xfs=""
 vhost_net="no"
 vhost_scsi="no"
 kvm="no"
-colo="yes"
+colo=""
 rdma=""
 gprof="no"
 debug_tcg="no"
@@ -2729,6 +2729,37 @@ done
 glib_subprocess=yes
 if ! $pkg_config --atleast-version=2.38 glib-2.0; then
     glib_subprocess=no
+fi
+
+##########################################
+# colo/heartbeat check
+
+if test "$colo" != "no" ; then
+    cat > $TMPC << EOF
+#include <heartbeat/ha_msg.h>
+#include <heartbeat/hb_api.h>
+int main(void)
+{
+    ll_cluster_t *hb = NULL;
+    struct ha_msg *msg = NULL;
+
+    hb = ll_cluster_new("heartbeat");
+    msg = hb->llc_ops->readmsg(hb, 1);
+    ha_msg_del(msg);
+
+    return 0;
+}
+EOF
+    if compile_prog "$CFLAGS" "-lplumb -lhbclient" ; then
+        libs_softmmu="$libs_softmmu -lplumb -lhbclient"
+        colo="yes"
+    else
+        if test "$colo" = "yes"; then
+            feature_not_found "heartbeat" "Install cluster-glue devel and heartbeat devel.
+       For more infomation, please refer to http://linux-ha.org/wiki/Main_Pag"
+        fi
+        colo="no"
+    fi
 fi
 
 ##########################################

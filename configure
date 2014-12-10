@@ -2732,7 +2732,7 @@ if ! $pkg_config --atleast-version=2.38 glib-2.0; then
 fi
 
 ##########################################
-# colo/heartbeat check
+# colo: heartbeat and colo-agent check
 
 if test "$colo" != "no" ; then
     cat > $TMPC << EOF
@@ -2750,13 +2750,34 @@ int main(void)
     return 0;
 }
 EOF
-    if compile_prog "$CFLAGS" "-lplumb -lhbclient" ; then
+    if compile_prog "$CFLAGS -I /usr/include/heartbeat" "-lplumb -lhbclient"
+    then
+        # Some oem os like ubuntu will need to specify this extra cflags in
+        # order to avoid compile errors
+        CFLAGS="$CFLAGS -I /usr/include/heartbeat"
         libs_softmmu="$libs_softmmu -lplumb -lhbclient"
+        heartbeat="yes"
+    else
+        heartbeat="no"
+    fi
+
+    modprobe sch_colo >/dev/null 2>&1
+    if test "$?" = "0"; then
+        colo_agent="yes"
+    else
+        colo_agent="no"
+    fi
+
+    if test "$heartbeat" = "yes" && test "$colo_agent" = "yes" ; then
         colo="yes"
     else
         if test "$colo" = "yes"; then
-            feature_not_found "heartbeat" "Install cluster-glue devel and heartbeat devel.
-       For more infomation, please refer to http://linux-ha.org/wiki/Main_Pag"
+            error_exit "Heartbeat: $heartbeat, colo-agent: $colo_agent" \
+                "COLO requires heartbeat devel packages and colo-agent kernel modules." \
+                "Please install cluster-glue devel, heartbeat devel and colo-agent " \
+                "kernel modules. Refer to:" \
+                "http://linux-ha.org/wiki/Downloads" \
+                "https://github.com/wencongyang/colo-agent"
         fi
         colo="no"
     fi

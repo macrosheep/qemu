@@ -901,6 +901,24 @@ QEMUSizedBuffer *qsb_clone(const QEMUSizedBuffer *qsb)
     return out;
 }
 
+/**
+ * Put the content of a given QEMUSizedBuffer into QEMUFile.
+ *
+ * @f: A QEMUFile
+ * @qsb: A QEMUSizedBuffer
+ * @size: size of content to write
+ */
+void qsb_put_buffer(QEMUFile *f, QEMUSizedBuffer *qsb, int size)
+{
+    int i, l;
+
+    for (i = 0; i < qsb->n_iov && size > 0; i++) {
+        l = MIN(qsb->iov[i].iov_len, size);
+        qemu_put_buffer(f, qsb->iov[i].iov_base, l);
+        size -= l;
+    }
+}
+
 typedef struct QEMUBuffer {
     QEMUSizedBuffer *qsb;
     QEMUFile *file;

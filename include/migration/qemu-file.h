@@ -132,6 +132,7 @@ ssize_t qsb_get_buffer(const QEMUSizedBuffer *, off_t start, size_t count,
 ssize_t qsb_write_at(QEMUSizedBuffer *qsb, const uint8_t *buf,
                      off_t pos, size_t count);
 void qsb_put_buffer(QEMUFile *f, QEMUSizedBuffer *qsb, int size);
+int qsb_fill_buffer(QEMUSizedBuffer *qsb, QEMUFile *f, int size);
 
 
 /*

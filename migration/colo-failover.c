@@ -10,6 +10,7 @@
 
 #include "migration/migration-colo.h"
 #include "migration/migration-failover.h"
+#include "qmp-commands.h"
 
 static bool failover_request = false;
 
@@ -37,4 +38,9 @@ void failover_request_clear(void)
 bool failover_request_is_set(void)
 {
     return failover_request;
+}
+
+void qmp_colo_lost_heartbeat(Error **errp)
+{
+    failover_request_set();
 }

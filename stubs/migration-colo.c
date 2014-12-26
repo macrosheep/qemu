@@ -9,6 +9,7 @@
  */
 
 #include "migration/migration-colo.h"
+#include "qmp-commands.h"
 
 bool colo_supported(void)
 {
@@ -32,4 +33,11 @@ bool colo_is_master(void)
 bool colo_is_slave(void)
 {
     return false;
+}
+
+void qmp_colo_lost_heartbeat(Error **errp)
+{
+    error_setg(errp, "COLO is not supported, please rerun configure"
+                     " with --enable-colo option in order to support"
+                     " COLO feature");
 }

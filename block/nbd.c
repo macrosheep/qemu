@@ -44,6 +44,9 @@
 typedef struct BDRVNBDState {
     NbdClientSession client;
     QemuOpts *socket_opts;
+
+    /* disk replication */
+    bool disk_replication_enabled;
 } BDRVNBDState;
 
 static int nbd_parse_uri(const char *filename, QDict *options)
@@ -385,6 +388,48 @@ static void nbd_refresh_filename(BlockDriverState *bs)
     bs->full_open_options = opts;
 }
 
+static int nbd_start_replication(BlockDriverState *bs, int mode)
+{
+    BDRVNBDState *s = bs->opaque;
+
+    /*
+     * TODO: support COLO_SECONDARY_MODE if we allow secondary
+     * QEMU becoming primary QEMU.
+     */
+    if (mode != COLO_PRIMARY_MODE)
+        return -1;
+
+    if (s->disk_replication_enabled)
+        return -1;
+
+    /* TODO: NBD client should be one child of quorum, how to verify it? */
+    s->disk_replication_enabled = true;
+
+    return 0;
+}
+
+static int nbd_do_checkpoint(BlockDriverState *bs)
+{
+    BDRVNBDState *s = bs->opaque;
+
+    if (!s->disk_replication_enabled)
+        return -1;
+
+    return 0;
+}
+
+static int nbd_stop_replication(BlockDriverState *bs)
+{
+    BDRVNBDState *s = bs->opaque;
+
+    if (!s->disk_replication_enabled)
+        return -1;
+
+    s->disk_replication_enabled = false;
+
+    return 0;
+}
+
 static BlockDriver bdrv_nbd = {
     .format_name                = "nbd",
     .protocol_name              = "nbd",
@@ -400,6 +445,9 @@ static BlockDriver bdrv_nbd = {
     .bdrv_detach_aio_context    = nbd_detach_aio_context,
     .bdrv_attach_aio_context    = nbd_attach_aio_context,
     .bdrv_refresh_filename      = nbd_refresh_filename,
+    .bdrv_start_replication     = nbd_start_replication,
+    .bdrv_do_checkpoint         = nbd_do_checkpoint,
+    .bdrv_stop_replication      = nbd_stop_replication,
 };
 
 static BlockDriver bdrv_nbd_tcp = {
@@ -417,6 +465,9 @@ static BlockDriver bdrv_nbd_tcp = {
     .bdrv_detach_aio_context    = nbd_detach_aio_context,
     .bdrv_attach_aio_context    = nbd_attach_aio_context,
     .bdrv_refresh_filename      = nbd_refresh_filename,
+    .bdrv_start_replication     = nbd_start_replication,
+    .bdrv_do_checkpoint         = nbd_do_checkpoint,
+    .bdrv_stop_replication      = nbd_stop_replication,
 };
 
 static BlockDriver bdrv_nbd_unix = {
@@ -434,6 +485,9 @@ static BlockDriver bdrv_nbd_unix = {
     .bdrv_detach_aio_context    = nbd_detach_aio_context,
     .bdrv_attach_aio_context    = nbd_attach_aio_context,
     .bdrv_refresh_filename      = nbd_refresh_filename,
+    .bdrv_start_replication     = nbd_start_replication,
+    .bdrv_do_checkpoint         = nbd_do_checkpoint,
+    .bdrv_stop_replication      = nbd_stop_replication,
 };
 
 static void bdrv_nbd_init(void)

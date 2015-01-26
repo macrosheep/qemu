@@ -16,6 +16,7 @@
 #include "qemu/error-report.h"
 #include "migration/migration-failover.h"
 #include "net/colo-nic.h"
+#include "block/block.h"
 
 /*
  * checkpoint timer: unit ms
@@ -303,6 +304,10 @@ static int do_colo_transaction(MigrationState *s, QEMUFile *control)
         ret = -1;
         goto out;
     }
+
+    /* we call this api although this may do nothing on primary side */
+    bdrv_do_checkpoint_all();
+
     /* Disable block migration */
     s->params.blk = 0;
     s->params.shared = 0;
@@ -398,6 +403,12 @@ static void *colo_thread(void *opaque)
 
     colo_buffer = qsb_create(NULL, COLO_BUFFER_BASE_SIZE);
 
+    /* start block replication */
+    ret = bdrv_start_replication_all(COLO_PRIMARY_MODE);
+    if (ret) {
+        goto out;
+    }
+
     while (s->state == MIG_STATE_COLO) {
         /* wait for a colo checkpoint */
         wait_cp = colo_agent_wait_checkpoint();
@@ -432,6 +443,8 @@ out:
             ;
         }
     }
+
+    bdrv_stop_replication_all();
 
     if (colo_buffer) {
         qsb_free(colo_buffer);
@@ -552,6 +565,12 @@ void *colo_process_incoming_checkpoints(void *opaque)
         goto out;
     }
 
+    /* start block replication */
+    ret = bdrv_start_replication_all(COLO_SECONDARY_MODE);
+    if (ret) {
+        goto out;
+    }
+
     /* in COLO mode, slave is runing, so start the vm */
     vm_start();
 
@@ -619,6 +638,9 @@ void *colo_process_incoming_checkpoints(void *opaque)
         vmstate_loading = false;
         qemu_mutex_unlock_iothread();
 
+        /* discard colo disk buffer */
+        bdrv_do_checkpoint_all();
+
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_LOADED);
         if (ret) {
             goto out;
@@ -641,6 +663,7 @@ out:
         }
     }
     colo = NULL;
+    bdrv_stop_replication_all();
 
     if (fb) {
         qemu_fclose(fb);

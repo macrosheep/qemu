@@ -563,6 +563,10 @@ int bdrv_start_replication(BlockDriverState *bs, int mode);
 int bdrv_do_checkpoint(BlockDriverState *bs);
 int bdrv_stop_replication(BlockDriverState *bs);
 
+int bdrv_start_replication_all(int mode);
+int bdrv_do_checkpoint_all(void);
+int bdrv_stop_replication_all(void);
+
 typedef struct CowRequest {
     int64_t start;
     int64_t end;

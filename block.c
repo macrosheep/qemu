@@ -6154,6 +6154,18 @@ int bdrv_start_replication(BlockDriverState *bs, int mode)
     return -1;
 }
 
+int bdrv_start_replication_all(int mode) {
+    BlockDriverState *bs;
+
+    QTAILQ_FOREACH(bs, &bdrv_states, device_list) {
+        if (bdrv_start_replication(bs, mode)) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int bdrv_do_checkpoint(BlockDriverState *bs)
 {
     BlockDriver *drv = bs->drv;
@@ -6166,6 +6178,18 @@ int bdrv_do_checkpoint(BlockDriverState *bs)
     return -1;
 }
 
+int bdrv_do_checkpoint_all(void) {
+    BlockDriverState *bs;
+
+    QTAILQ_FOREACH(bs, &bdrv_states, device_list) {
+        if (bdrv_do_checkpoint(bs)) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 int bdrv_stop_replication(BlockDriverState *bs)
 {
     BlockDriver *drv = bs->drv;
@@ -6176,4 +6200,16 @@ int bdrv_stop_replication(BlockDriverState *bs)
     }
 
     return -1;
+}
+
+int bdrv_stop_replication_all(void) {
+    BlockDriverState *bs;
+
+    QTAILQ_FOREACH(bs, &bdrv_states, device_list) {
+        if (bdrv_stop_replication(bs)) {
+            return -1;
+        }
+    }
+
+    return 0;
 }

@@ -531,7 +531,7 @@ static BlockDriver bdrv_nbd_unix = {
 };
 
 static BlockDriver bdrv_nbd_colo = {
-    .format_name                = "nbd",
+    .format_name                = "nbd+colo",
     .protocol_name              = "nbd+colo",
     .instance_size              = sizeof(BDRVNBDState),
     .bdrv_parse_filename        = nbd_parse_filename,

@@ -373,6 +373,8 @@ static BlockDriver bdrv_blkcolo = {
     .bdrv_start_replication = blkcolo_start_replication,
     .bdrv_do_checkpoint = blkcolo_do_checkpoint,
     .bdrv_stop_replication = blkcolo_stop_replication,
+
+    .supports_backing = true,
 };
 
 static void bdrv_blkcolo_init(void)

@@ -156,7 +156,7 @@ static int blk_start_replication(bool primary)
 
         ret = bdrv_start_replication(blk_bs(blk), mode);
         if (ret)
-            break;
+            return 0;
     }
 
     if (ret < 0) {

@@ -16,6 +16,8 @@
 #include "qemu/error-report.h"
 #include "migration/migration-failover.h"
 #include "net/colo-nic.h"
+#include "block/block.h"
+#include "sysemu/block-backend.h"
 
 /*
  * checkpoint timer: unit ms
@@ -140,6 +142,61 @@ static int colo_agent_preresume(void)
 static int colo_agent_postresume(void)
 {
     return ioctl(vm_fd, COMP_IOCTRESUME);
+}
+
+static int blk_start_replication(bool primary)
+{
+    int mode = primary ? COLO_PRIMARY_MODE: COLO_SECONDARY_MODE;
+    BlockBackend *blk, *temp;
+    int ret = 0;
+
+    for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
+        if (blk_is_read_only(blk))
+            continue;
+
+        ret = bdrv_start_replication(blk_bs(blk), mode);
+        if (ret)
+            break;
+    }
+
+    if (ret < 0) {
+        for (temp = blk_next(NULL); temp != blk; temp = blk_next(temp))
+            bdrv_stop_replication(blk_bs(temp));
+    }
+
+    return ret;
+}
+
+static int blk_do_checkpoint(void)
+{
+    BlockBackend *blk;
+    int ret = 0;
+
+    for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
+        if (blk_is_read_only(blk))
+            continue;
+
+        if (bdrv_do_checkpoint(blk_bs(blk)))
+            ret = -1;
+    }
+
+    return ret;
+}
+
+static int blk_stop_replication(void)
+{
+    BlockBackend *blk;
+    int ret = 0;
+
+    for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
+        if (blk_is_read_only(blk))
+            continue;
+
+        if (bdrv_stop_replication(blk_bs(blk)))
+            ret = -1;
+    }
+
+    return ret;
 }
 
 /* failover */
@@ -303,6 +360,10 @@ static int do_colo_transaction(MigrationState *s, QEMUFile *control)
         ret = -1;
         goto out;
     }
+
+    /* we call this api although this may do nothing on primary side */
+    blk_do_checkpoint();
+
     /* Disable block migration */
     s->params.blk = 0;
     s->params.shared = 0;
@@ -398,6 +459,12 @@ static void *colo_thread(void *opaque)
 
     colo_buffer = qsb_create(NULL, COLO_BUFFER_BASE_SIZE);
 
+    /* start block replication */
+    ret = blk_start_replication(true);
+    if (ret) {
+        goto out;
+    }
+
     /* Start VM */
     qemu_mutex_lock_iothread();
     vm_start();
@@ -437,6 +504,8 @@ out:
             ;
         }
     }
+
+    blk_stop_replication();
 
     if (colo_buffer) {
         qsb_free(colo_buffer);
@@ -557,6 +626,12 @@ void *colo_process_incoming_checkpoints(void *opaque)
         goto out;
     }
 
+    /* start block replication */
+    ret = blk_start_replication(false);
+    if (ret) {
+        goto out;
+    }
+
     /* in COLO mode, slave is runing, so start the vm */
     vm_start();
 
@@ -624,6 +699,9 @@ void *colo_process_incoming_checkpoints(void *opaque)
         vmstate_loading = false;
         qemu_mutex_unlock_iothread();
 
+        /* discard colo disk buffer */
+        blk_do_checkpoint();
+
         ret = colo_ctl_put(ctl, COLO_CHECKPOINT_LOADED);
         if (ret) {
             goto out;
@@ -646,6 +724,7 @@ out:
         }
     }
     colo = NULL;
+    blk_stop_replication();
 
     if (fb) {
         qemu_fclose(fb);

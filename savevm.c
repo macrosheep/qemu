@@ -42,6 +42,7 @@
 #include "qemu/iov.h"
 #include "block/snapshot.h"
 #include "block/qapi.h"
+#include "migration/migration-colo.h"
 
 
 #ifndef ETH_P_RARP
@@ -778,14 +779,17 @@ void qemu_savevm_state_complete(QEMUFile *f)
 
     qemu_put_byte(f, QEMU_VM_EOF);
 
-    json_end_array(vmdesc);
-    qjson_finish(vmdesc);
-    vmdesc_len = strlen(qjson_get_str(vmdesc));
+    /* We don't need to send vm desc in COLO mode */
+    if ( !migrate_use_colo() ) {
+        json_end_array(vmdesc);
+        qjson_finish(vmdesc);
+        vmdesc_len = strlen(qjson_get_str(vmdesc));
 
-    qemu_put_byte(f, QEMU_VM_VMDESCRIPTION);
-    qemu_put_be32(f, vmdesc_len);
-    qemu_put_buffer(f, (uint8_t *)qjson_get_str(vmdesc), vmdesc_len);
-    object_unref(OBJECT(vmdesc));
+        qemu_put_byte(f, QEMU_VM_VMDESCRIPTION);
+        qemu_put_be32(f, vmdesc_len);
+        qemu_put_buffer(f, (uint8_t *)qjson_get_str(vmdesc), vmdesc_len);
+        object_unref(OBJECT(vmdesc));
+    }
 
     qemu_fflush(f);
 }

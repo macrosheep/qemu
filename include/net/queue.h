@@ -36,6 +36,13 @@ typedef void (NetPacketSent) (NetClientState *sender, ssize_t ret);
 
 NetQueue *qemu_new_net_queue(void *opaque);
 
+void qemu_net_queue_append(NetQueue *queue,
+                           NetClientState *sender,
+                           unsigned flags,
+                           const uint8_t *buf,
+                           size_t size,
+                           NetPacketSent *sent_cb);
+
 void qemu_del_net_queue(NetQueue *queue);
 
 ssize_t qemu_net_queue_send(NetQueue *queue,

@@ -87,12 +87,12 @@ void qemu_del_net_queue(NetQueue *queue)
     g_free(queue);
 }
 
-static void qemu_net_queue_append(NetQueue *queue,
-                                  NetClientState *sender,
-                                  unsigned flags,
-                                  const uint8_t *buf,
-                                  size_t size,
-                                  NetPacketSent *sent_cb)
+void qemu_net_queue_append(NetQueue *queue,
+                           NetClientState *sender,
+                           unsigned flags,
+                           const uint8_t *buf,
+                           size_t size,
+                           NetPacketSent *sent_cb)
 {
     NetPacket *packet;
 

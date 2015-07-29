@@ -13,6 +13,7 @@
 #include "qapi/opts-visitor.h"
 #include "qapi/dealloc-visitor.h"
 #include "qemu/config-file.h"
+#include "qmp-commands.h"
 
 #include "net/filter.h"
 #include "net/net.h"
@@ -39,7 +40,7 @@ NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
     return nf;
 }
 
-static inline void qemu_cleanup_net_filter(NetFilterState *nf)
+static void qemu_cleanup_net_filter(NetFilterState *nf)
 {
     /* TODO: remove netfilter from netdev */
 
@@ -52,6 +53,79 @@ static inline void qemu_cleanup_net_filter(NetFilterState *nf)
     g_free(nf->name);
     g_free(nf->model);
     g_free(nf);
+}
+
+static void qemu_del_net_filter(NetFilterState *nf)
+{
+    /* handle multi queue? */
+    qemu_cleanup_net_filter(nf);
+}
+
+static NetFilterState *qemu_find_netfilter(const char *id)
+{
+    NetFilterState *nf;
+
+    QTAILQ_FOREACH(nf, &net_filters, next) {
+        if (!strcmp(nf->name, id)) {
+            return nf;
+        }
+    }
+
+    return NULL;
+}
+
+static int net_init_filter(void *dummy, QemuOpts *opts, Error **errp);
+void netfilter_add(QemuOpts *opts, Error **errp)
+{
+    net_init_filter(NULL, opts, errp);
+}
+
+void qmp_netfilter_add(QDict *qdict, QObject **ret, Error **errp)
+{
+    Error *local_err = NULL;
+    QemuOptsList *opts_list;
+    QemuOpts *opts;
+
+    opts_list = qemu_find_opts_err("netfilter", &local_err);
+    if (local_err) {
+        goto out;
+    }
+
+    opts = qemu_opts_from_qdict(opts_list, qdict, &local_err);
+    if (local_err) {
+        goto out;
+    }
+
+    netfilter_add(opts, &local_err);
+    if (local_err) {
+        qemu_opts_del(opts);
+        goto out;
+    }
+
+out:
+    error_propagate(errp, local_err);
+}
+
+void qmp_netfilter_del(const char *id, Error **errp)
+{
+    NetFilterState *nf;
+    QemuOpts *opts;
+
+    nf = qemu_find_netfilter(id);
+    if (!nf) {
+        error_set(errp, ERROR_CLASS_DEVICE_NOT_FOUND,
+                  "Device '%s' not found", id);
+        return;
+    }
+
+    opts = qemu_opts_find(qemu_find_opts_err("netfilter", NULL), id);
+    if (!opts) {
+        error_setg(errp, "Device '%s' is not a netfilter", id);
+        return;
+    }
+
+    qemu_del_net_filter(nf);
+    qemu_opts_del(opts);
 }
 
 typedef int (NetFilterInit)(const NetFilterOptions *opts,

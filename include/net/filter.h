@@ -32,5 +32,7 @@ NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
                                     NetClientState *netdev,
                                     const char *model,
                                     const char *name);
+void netfilter_add(QemuOpts *opts, Error **errp);
+void qmp_netfilter_add(QDict *qdict, QObject **ret, Error **errp);
 
 #endif /* QEMU_NET_FILTER_H */

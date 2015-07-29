@@ -2783,6 +2783,7 @@ static bool object_create_initial(const char *type)
     if (g_str_equal(type, "rng-egd")) {
         return false;
     }
+    /* TODO: reture false for concrete netfilters */
     return true;
 }
 
@@ -4302,12 +4303,6 @@ int main(int argc, char **argv, char **envp)
         exit(0);
     }
 
-    if (qemu_opts_foreach(qemu_find_opts("object"),
-                          object_create,
-                          object_create_delayed, NULL)) {
-        exit(1);
-    }
-
     machine_opts = qemu_get_machine_opts();
     if (qemu_opt_foreach(machine_opts, machine_set_property, current_machine,
                          NULL)) {
@@ -4410,6 +4405,12 @@ int main(int argc, char **argv, char **envp)
     atexit(&net_cleanup);
 
     if (net_init_clients() < 0) {
+        exit(1);
+    }
+
+    if (qemu_opts_foreach(qemu_find_opts("object"),
+                          object_create,
+                          object_create_delayed, NULL)) {
         exit(1);
     }
 

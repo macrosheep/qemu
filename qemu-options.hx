@@ -1575,7 +1575,10 @@ DEF("net", HAS_ARG, QEMU_OPTION_net,
     "socket][,vlan=n][,option][,option][,...]\n"
     "                old way to initialize a host network interface\n"
     "                (use the -netdev option if possible instead)\n", QEMU_ARCH_ALL)
-DEF("netfilter", HAS_ARG, QEMU_OPTION_netfilter, "", QEMU_ARCH_ALL)
+DEF("netfilter", HAS_ARG, QEMU_OPTION_netfilter,
+    "-netfilter buffer,id=str,netdev=str[,type=in|out|all,interval=n]\n"
+    "                buffer netdev in/out packets. if interval provided, will release\n"
+    "                packets by interval. interval scale: microsecond\n", QEMU_ARCH_ALL)
 STEXI
 @item -net nic[,vlan=@var{n}][,macaddr=@var{mac}][,model=@var{type}] [,name=@var{name}][,addr=@var{addr}][,vectors=@var{v}]
 @findex -net

@@ -2584,6 +2584,21 @@
 { 'command': 'netfilter_del', 'data': {'id': 'str'} }
 
 ##
+# @NetFilterBufferOptions
+#
+# a netbuffer filter for network backend.
+#
+# @interval: #optional release packets by interval, if no interval supplied,
+#            will release packets when filter_buffer_release_all been called.
+#            scale: microsecond
+#
+# Since 2.5
+##
+{ 'struct': 'NetFilterBufferOptions',
+  'data': {
+    '*interval':     'int64' } }
+
+##
 # @NetFilterOptions
 #
 # A discriminated record of network filters.
@@ -2592,7 +2607,8 @@
 #
 ##
 { 'union': 'NetFilterOptions',
-  'data': { } }
+  'data': {
+    'buffer':     'NetFilterBufferOptions'} }
 
 ##
 # @NetFilter

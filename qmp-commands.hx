@@ -926,6 +926,63 @@ Example:
 EQMP
 
     {
+        .name       = "netfilter_add",
+        .args_type  = "netfilter:O",
+        .mhandler.cmd_new = qmp_netfilter_add,
+    },
+
+SQMP
+netfilter_add
+----------
+
+Add netfilter.
+
+Arguments:
+
+- "type": the filter type (json-string)
+- "id": the netfilter's ID, must be unique (json-string)
+- "netdev": the netdev's ID which this filter will be attached to(json-string)
+- filter options
+
+Example:
+
+-> { "execute": "netfilter_add",
+                "arguments": { "type": "type", "id": "nf0",
+                               "netdev": "bn",
+                               "chain": "in" } }
+<- { "return": {} }
+
+Note: The supported filter options are the same ones supported by the
+      '-netfilter' command-line argument, which are listed in the '-help'
+      output or QEMU's manual
+
+EQMP
+
+    {
+        .name       = "netfilter_del",
+        .args_type  = "id:s",
+        .mhandler.cmd_new = qmp_marshal_input_netfilter_del,
+    },
+
+SQMP
+netfilter_del
+----------
+
+Remove netfilter.
+
+Arguments:
+
+- "id": the netfilter's ID, must be unique (json-string)
+
+Example:
+
+-> { "execute": "netfilter_del", "arguments": { "id": "nf0" } }
+<- { "return": {} }
+
+
+EQMP
+
+    {
         .name       = "object-add",
         .args_type  = "qom-type:s,id:s,props:q?",
         .mhandler.cmd_new = qmp_object_add,

@@ -947,7 +947,7 @@ Arguments:
 Example:
 
 -> { "execute": "netfilter_add",
-                "arguments": { "type": "type", "id": "nf0",
+                "arguments": { "type": "buffer", "id": "nf0",
                                "netdev": "bn",
                                "chain": "in" } }
 <- { "return": {} }

@@ -50,5 +50,10 @@ NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
                                     const char *name);
 void netfilter_add(QemuOpts *opts, Error **errp);
 void qmp_netfilter_add(QDict *qdict, QObject **ret, Error **errp);
+int qemu_find_netfilters_by_model(const char *model, NetFilterState **nfs,
+                                  int max);
+
+/* netbuffer filter */
+void filter_buffer_release_all(void);
 
 #endif /* QEMU_NET_FILTER_H */

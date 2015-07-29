@@ -11,12 +11,14 @@
 #include "filters.h"
 #include "qemu-common.h"
 #include "qemu/error-report.h"
+#include "qemu/main-loop.h"
 
 typedef struct FILTERBUFFERState {
     NetFilterState nf;
     NetClientState dummy; /* used to send buffered packets */
     NetQueue *incoming_queue;
     NetQueue *inflight_queue;
+    QEMUBH *flush_bh;
 } FILTERBUFFERState;
 
 static void packet_send_completed(NetClientState *nc, ssize_t len)
@@ -56,6 +58,27 @@ static void filter_buffer_flush(NetFilterState *nf)
     }
 }
 
+static void filter_buffer_flush_bh(void *opaque)
+{
+    FILTERBUFFERState *s = opaque;
+    NetFilterState *nf = &s->nf;
+    filter_buffer_flush(nf);
+}
+
+static void filter_buffer_release_one(NetFilterState *nf)
+{
+    FILTERBUFFERState *s = DO_UPCAST(FILTERBUFFERState, nf, nf);
+
+    /* flush inflight packets */
+    if (s->inflight_queue) {
+        filter_buffer_flush(nf);
+    }
+
+    s->inflight_queue = s->incoming_queue;
+    s->incoming_queue = qemu_new_net_queue(nf);
+    qemu_bh_schedule(s->flush_bh);
+}
+
 /* filter APIs */
 static ssize_t filter_buffer_receive(NetFilterState *nf,
                                      NetClientState *sender,
@@ -93,6 +116,10 @@ static void filter_buffer_cleanup(NetFilterState *nf)
     s->incoming_queue = NULL;
     filter_buffer_flush(nf);
 
+    if (s->flush_bh) {
+        qemu_bh_delete(s->flush_bh);
+        s->flush_bh = NULL;
+    }
     return;
 }
 
@@ -122,6 +149,20 @@ int net_init_filter_buffer(const NetFilterOptions *opts, const char *name,
      */
     s->dummy.peer = netdev;
     s->incoming_queue = qemu_new_net_queue(nf);
+    s->flush_bh = qemu_bh_new(filter_buffer_flush_bh, s);
 
     return 0;
+}
+
+/* public APIs */
+void filter_buffer_release_all(void)
+{
+    NetFilterState *nfs[MAX_QUEUE_NUM];
+    int queues, i;
+
+    queues = qemu_find_netfilters_by_model("buffer", nfs, MAX_QUEUE_NUM);
+
+    for (i = 0; i < queues; i++) {
+        filter_buffer_release_one(nfs[i]);
+    }
 }

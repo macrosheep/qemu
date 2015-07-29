@@ -93,6 +93,24 @@ static NetFilterState *qemu_find_netfilter(const char *id)
     return NULL;
 }
 
+int qemu_find_netfilters_by_model(const char *model, NetFilterState **nfs,
+                                  int max)
+{
+    NetFilterState *nf;
+    int ret = 0;
+
+    QTAILQ_FOREACH(nf, &net_filters, next) {
+        if (!strcmp(nf->model, model)) {
+            if (ret < max) {
+                nfs[ret] = nf;
+            }
+            ret++;
+        }
+    }
+
+    return ret;
+}
+
 static int net_init_filter(void *dummy, QemuOpts *opts, Error **errp);
 void netfilter_add(QemuOpts *opts, Error **errp)
 {

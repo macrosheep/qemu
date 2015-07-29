@@ -40,6 +40,11 @@ typedef struct NICConf {
 
 
 /* Net clients */
+typedef struct Filter Filter;
+struct Filter {
+    NetFilterState *nf;
+    QTAILQ_ENTRY(Filter) next;
+};
 
 typedef void (NetPoll)(NetClientState *, bool enable);
 typedef int (NetCanReceive)(NetClientState *);
@@ -92,6 +97,7 @@ struct NetClientState {
     NetClientDestructor *destructor;
     unsigned int queue_index;
     unsigned rxfilter_notify_enabled:1;
+    QTAILQ_HEAD(, Filter) filters;
 };
 
 typedef struct NICState {
@@ -109,6 +115,8 @@ NetClientState *qemu_new_net_client(NetClientInfo *info,
                                     NetClientState *peer,
                                     const char *model,
                                     const char *name);
+int qemu_netdev_add_filter(NetClientState *nc, NetFilterState *nf);
+void qemu_netdev_remove_filter(NetClientState *nc, NetFilterState *nf);
 NICState *qemu_new_nic(NetClientInfo *info,
                        NICConf *conf,
                        const char *model,

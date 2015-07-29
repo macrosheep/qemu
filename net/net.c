@@ -287,6 +287,7 @@ static void qemu_net_client_setup(NetClientState *nc,
 
     nc->incoming_queue = qemu_new_net_queue(nc);
     nc->destructor = destructor;
+    QTAILQ_INIT(&nc->filters);
 }
 
 NetClientState *qemu_new_net_client(NetClientInfo *info,
@@ -303,6 +304,38 @@ NetClientState *qemu_new_net_client(NetClientInfo *info,
                           qemu_net_client_destructor);
 
     return nc;
+}
+
+int qemu_netdev_add_filter(NetClientState *nc, NetFilterState *nf)
+{
+    Filter *filter = g_malloc0(sizeof(*filter));
+
+    filter->nf = nf;
+    QTAILQ_INSERT_TAIL(&nc->filters, filter, next);
+    return 0;
+}
+
+static void remove_filter(NetClientState *nc, Filter *filter)
+{
+    if (!filter) {
+        return;
+    }
+
+    QTAILQ_REMOVE(&nc->filters, filter, next);
+    g_free(filter);
+}
+
+void qemu_netdev_remove_filter(NetClientState *nc, NetFilterState *nf)
+{
+    Filter *filter = NULL;
+
+    QTAILQ_FOREACH(filter, &nc->filters, next) {
+        if (filter->nf == nf) {
+            break;
+        }
+    }
+
+    remove_filter(nc, filter);
 }
 
 NICState *qemu_new_nic(NetClientInfo *info,

@@ -17,6 +17,7 @@
 
 #include "net/filter.h"
 #include "net/net.h"
+#include "filters.h"
 
 static QTAILQ_HEAD(, NetFilterState) net_filters;
 
@@ -168,6 +169,7 @@ typedef int (NetFilterInit)(const NetFilterOptions *opts,
 
 static
 NetFilterInit * const net_filter_init_fun[NET_FILTER_OPTIONS_KIND_MAX] = {
+    [NET_FILTER_OPTIONS_KIND_BUFFER] = net_init_filter_buffer,
 };
 
 static int net_filter_init1(const NetFilter *netfilter, Error **errp)

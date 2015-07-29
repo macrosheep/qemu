@@ -2577,6 +2577,16 @@
 { 'command': 'netfilter_del', 'data': {'id': 'str'} }
 
 ##
+# @NetFilterBufferOptions
+#
+# a netbuffer filter for network backend.
+#
+# Since 2.5
+##
+{ 'struct': 'NetFilterBufferOptions',
+  'data': { } }
+
+##
 # @NetFilterOptions
 #
 # A discriminated record of network filters.
@@ -2585,7 +2595,8 @@
 #
 ##
 { 'union': 'NetFilterOptions',
-  'data': { } }
+  'data': {
+    'buffer':     'NetFilterBufferOptions'} }
 
 ##
 # @NetFilter

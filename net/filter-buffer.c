@@ -12,6 +12,7 @@
 #include "qemu-common.h"
 #include "qemu/error-report.h"
 #include "qemu/main-loop.h"
+#include "qemu/timer.h"
 
 typedef struct FILTERBUFFERState {
     NetFilterState nf;
@@ -19,6 +20,8 @@ typedef struct FILTERBUFFERState {
     NetQueue *incoming_queue;
     NetQueue *inflight_queue;
     QEMUBH *flush_bh;
+    int64_t interval;
+    QEMUTimer release_timer;
 } FILTERBUFFERState;
 
 static void packet_send_completed(NetClientState *nc, ssize_t len)
@@ -79,6 +82,14 @@ static void filter_buffer_release_one(NetFilterState *nf)
     qemu_bh_schedule(s->flush_bh);
 }
 
+static void filter_buffer_release_timer(void *opaque)
+{
+    FILTERBUFFERState *s = opaque;
+    filter_buffer_release_one(&s->nf);
+    timer_mod(&s->release_timer,
+              qemu_clock_get_us(QEMU_CLOCK_VIRTUAL) + s->interval);
+}
+
 /* filter APIs */
 static ssize_t filter_buffer_receive(NetFilterState *nf,
                                      NetClientState *sender,
@@ -109,6 +120,10 @@ static void filter_buffer_cleanup(NetFilterState *nf)
 {
     FILTERBUFFERState *s = DO_UPCAST(FILTERBUFFERState, nf, nf);
 
+    if (s->interval) {
+        timer_del(&s->release_timer);
+    }
+
     /* flush inflight packets */
     filter_buffer_flush(nf);
     /* flush incoming packets */
@@ -136,8 +151,10 @@ int net_init_filter_buffer(const NetFilterOptions *opts, const char *name,
 {
     NetFilterState *nf;
     FILTERBUFFERState *s;
+    const NetFilterBufferOptions *bufferopt;
 
     assert(opts->kind == NET_FILTER_OPTIONS_KIND_BUFFER);
+    bufferopt = opts->buffer;
 
     nf = qemu_new_net_filter(&net_filter_buffer_info, netdev, "buffer", name);
     s = DO_UPCAST(FILTERBUFFERState, nf, nf);
@@ -150,6 +167,13 @@ int net_init_filter_buffer(const NetFilterOptions *opts, const char *name,
     s->dummy.peer = netdev;
     s->incoming_queue = qemu_new_net_queue(nf);
     s->flush_bh = qemu_bh_new(filter_buffer_flush_bh, s);
+    s->interval = bufferopt->has_interval ? bufferopt->interval : 0;
+    if (s->interval) {
+        timer_init_us(&s->release_timer, QEMU_CLOCK_VIRTUAL,
+                      filter_buffer_release_timer, s);
+        timer_mod(&s->release_timer,
+                  qemu_clock_get_us(QEMU_CLOCK_VIRTUAL) + s->interval);
+    }
 
     return 0;
 }

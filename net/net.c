@@ -24,6 +24,7 @@
 #include "config-host.h"
 
 #include "net/net.h"
+#include "net/filter.h"
 #include "clients.h"
 #include "hub.h"
 #include "net/slirp.h"
@@ -592,6 +593,25 @@ int qemu_can_send_packet(NetClientState *sender)
     return 1;
 }
 
+static ssize_t filter_receive(NetClientState *nc, NetClientState *sender,
+                              unsigned flags,
+                              const uint8_t *data,
+                              size_t size) {
+    ssize_t ret = 0;
+    Filter *filter = NULL;
+    NetFilterState *nf = NULL;
+
+    QTAILQ_FOREACH(filter, &nc->filters, next) {
+        nf = filter->nf;
+        ret = nf->info->receive(nf, sender, flags, data, size);
+        if (ret == size) {
+            return ret;
+        }
+    }
+
+    return ret;
+}
+
 ssize_t qemu_deliver_packet(NetClientState *sender,
                             unsigned flags,
                             const uint8_t *data,
@@ -607,6 +627,17 @@ ssize_t qemu_deliver_packet(NetClientState *sender,
 
     if (nc->receive_disabled) {
         return 0;
+    }
+
+    /* Let filters handle the packet first */
+    ret = filter_receive(sender, sender, flags, data, size);
+    if (ret == size) {
+        return size;
+    }
+
+    ret = filter_receive(nc, sender, flags, data, size);
+    if (ret == size) {
+        return size;
     }
 
     if (flags & QEMU_NET_PACKET_FLAG_RAW && nc->info->receive_raw) {
@@ -697,6 +728,26 @@ ssize_t qemu_send_packet_raw(NetClientState *nc, const uint8_t *buf, int size)
                                              buf, size, NULL);
 }
 
+static ssize_t filter_receive_iov(NetClientState *nc, NetClientState *sender,
+                                  unsigned flags,
+                                  const struct iovec *iov,
+                                  int iovcnt) {
+    ssize_t ret = 0;
+    Filter *filter = NULL;
+    NetFilterState *nf = NULL;
+    ssize_t size = iov_size(iov, iovcnt);
+
+    QTAILQ_FOREACH(filter, &nc->filters, next) {
+        nf = filter->nf;
+        ret = nf->info->receive_iov(nf, sender, flags, iov, iovcnt);
+        if (ret == size) {
+            return ret;
+        }
+    }
+
+    return ret;
+}
+
 static ssize_t nc_sendv_compat(NetClientState *nc, const struct iovec *iov,
                                int iovcnt)
 {
@@ -716,13 +767,25 @@ ssize_t qemu_deliver_packet_iov(NetClientState *sender,
 {
     NetClientState *nc = opaque;
     int ret;
+    ssize_t size = iov_size(iov, iovcnt);
 
     if (nc->link_down) {
-        return iov_size(iov, iovcnt);
+        return size;
     }
 
     if (nc->receive_disabled) {
         return 0;
+    }
+
+    /* Let filters handle the packet first */
+    ret = filter_receive_iov(sender, sender, flags, iov, iovcnt);
+    if (ret == size) {
+        return size;
+    }
+
+    ret = filter_receive_iov(nc, sender, flags, iov, iovcnt);
+    if (ret == size) {
+        return size;
     }
 
     if (nc->info->receive_iov) {

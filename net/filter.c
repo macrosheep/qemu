@@ -29,6 +29,7 @@ NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
     NetFilterState *nf;
 
     assert(info->size >= sizeof(NetFilterState));
+    assert(info->receive_iov);
 
     nf = g_malloc0(info->size);
     nf->info = info;

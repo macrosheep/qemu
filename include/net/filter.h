@@ -19,11 +19,19 @@ enum {
 };
 
 typedef void (FilterCleanup) (NetFilterState *);
+/*
+ * Return:
+ *   0: finished handling the packet, we should continue
+ *   size: filter stolen this packet, we stop pass this packet further
+ */
+typedef ssize_t (FilterReceiveIOV)(NetFilterState *, NetClientState *sender,
+                                   unsigned flags, const struct iovec *, int);
 
 typedef struct NetFilterInfo {
     NetFilterOptionsKind type;
     size_t size;
     FilterCleanup *cleanup;
+    FilterReceiveIOV *receive_iov;
 } NetFilterInfo;
 
 struct NetFilterState {

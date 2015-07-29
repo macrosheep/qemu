@@ -14,11 +14,26 @@
 #include "qapi/dealloc-visitor.h"
 #include "qemu/config-file.h"
 #include "qmp-commands.h"
+#include "qemu/iov.h"
 
 #include "net/filter.h"
 #include "net/net.h"
 
 static QTAILQ_HEAD(, NetFilterState) net_filters;
+
+static ssize_t filter_receive_iov_compat(NetFilterState *nf,
+                                         NetClientState *sender,
+                                         unsigned flags,
+                                         const struct iovec *iov,
+                                         int iovcnt)
+{
+    uint8_t buffer[NET_BUFSIZE];
+    size_t offset;
+
+    offset = iov_to_buf(iov, iovcnt, 0, buffer, sizeof(buffer));
+
+    return nf->info->receive(nf, sender, flags, buffer, offset);
+}
 
 NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
                                     NetClientState *netdev,
@@ -34,6 +49,9 @@ NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
     nf->model = g_strdup(model);
     nf->name = g_strdup(name);
     nf->netdev = netdev;
+    if (!nf->info->receive_iov) {
+        nf->info->receive_iov = filter_receive_iov_compat;
+    }
     QTAILQ_INSERT_TAIL(&net_filters, nf, next);
     qemu_netdev_add_filter(netdev, nf);
 

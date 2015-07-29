@@ -3571,6 +3571,24 @@ the @option{virtio-rng} device. The @option{chardev} parameter is
 the unique ID of a character device backend that provides the connection
 to the RNG daemon.
 
+@item -object filter-buffer,id=@var{id},netdev=@var{netdevid}[,chain=@var{all|in|out}][,interval=@var{t}]
+
+Buffer network packets on netdev @var{netdevid}.
+If interval @var{t} provided, will release packets by interval.
+Interval scale: microsecond.
+
+If interval @var{t} not provided, you have to make sure the packets can be
+released, either by manually remove this filter or call the release buffer API,
+otherwise, the packets will be buffered forever. Use with caution.
+
+chain @var{all|in|out} is an option that can be applied to any netfilter, default is @option{all}.
+
+@option{all} means this filter will receive packets both sent to/from the netdev
+
+@option{in} means this filter will receive packets sent to the netdev
+
+@option{out} means this filter will receive packets sent from the netdev
+
 @end table
 
 ETEXI

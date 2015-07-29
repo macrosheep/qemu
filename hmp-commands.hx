@@ -1255,7 +1255,7 @@ ETEXI
     {
         .name       = "netfilter_add",
         .args_type  = "netfilter:O",
-        .params     = "[type],id=str,netdev=str[,chain=in|out|all,prop=value][,...]",
+        .params     = "[buffer],id=str,netdev=str[,chain=in|out|all,prop=value][,...]",
         .help       = "add netfilter",
         .mhandler.cmd = hmp_netfilter_add,
         .command_completion = netfilter_add_completion,

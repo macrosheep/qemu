@@ -35,14 +35,14 @@ NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
     nf->name = g_strdup(name);
     nf->netdev = netdev;
     QTAILQ_INSERT_TAIL(&net_filters, nf, next);
-    /* TODO: attach netfilter to netdev */
+    qemu_netdev_add_filter(netdev, nf);
 
     return nf;
 }
 
 static void qemu_cleanup_net_filter(NetFilterState *nf)
 {
-    /* TODO: remove netfilter from netdev */
+    qemu_netdev_remove_filter(nf->netdev, nf);
 
     QTAILQ_REMOVE(&net_filters, nf, next);
 

@@ -28,6 +28,7 @@
 #include "hub.h"
 #include "net/slirp.h"
 #include "net/eth.h"
+#include "net/filter.h"
 #include "util.h"
 
 #include "monitor/monitor.h"
@@ -359,6 +360,15 @@ void *qemu_get_nic_opaque(NetClientState *nc)
 
 static void qemu_cleanup_net_client(NetClientState *nc)
 {
+    NetFilterState *nf, *next;
+    QemuOpts *opts;
+
+    QTAILQ_FOREACH_SAFE(nf, &nc->filters, next, next) {
+        opts = qemu_opts_find(qemu_find_opts_err("netfilter", NULL), nf->name);
+        qemu_del_net_filter(nf);
+        qemu_opts_del(opts);
+    }
+
     QTAILQ_REMOVE(&net_clients, nc, next);
 
     if (nc->info->cleanup) {

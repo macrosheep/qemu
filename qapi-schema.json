@@ -2537,6 +2537,36 @@
     'opts': 'NetClientOptions' } }
 
 ##
+# @NetFilterOptions
+#
+# A discriminated record of network filters.
+#
+# Since 2.5
+#
+##
+{ 'union': 'NetFilterOptions',
+  'data': { } }
+
+##
+# @NetFilter
+#
+# Captures the packets of a network backend.
+#
+# @id: identifier for monitor commands.
+#
+# @netdev: the network backend it attached to.
+#
+# @opts: filter type specific properties
+#
+# Since 2.5
+##
+{ 'struct': 'NetFilter',
+  'data': {
+    'id':   'str',
+    'netdev': 'str',
+    'opts': 'NetFilterOptions' } }
+
+##
 # @InetSocketAddress
 #
 # Captures a socket address or address range in the Internet namespace.

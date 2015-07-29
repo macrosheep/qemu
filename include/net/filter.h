@@ -9,7 +9,28 @@
 #define QEMU_NET_FILTER_H
 
 #include "qemu-common.h"
+#include "qemu/typedefs.h"
+
+typedef void (FilterCleanup) (NetFilterState *);
+
+typedef struct NetFilterInfo {
+    NetFilterOptionsKind type;
+    size_t size;
+    FilterCleanup *cleanup;
+} NetFilterInfo;
+
+struct NetFilterState {
+    NetFilterInfo *info;
+    char *model;
+    char *name;
+    NetClientState *netdev;
+    QTAILQ_ENTRY(NetFilterState) next;
+};
 
 int net_init_filters(void);
+NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
+                                    NetClientState *netdev,
+                                    const char *model,
+                                    const char *name);
 
 #endif /* QEMU_NET_FILTER_H */

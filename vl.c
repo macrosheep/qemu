@@ -2788,7 +2788,12 @@ static bool object_create_initial(const char *type)
     if (g_str_equal(type, "rng-egd")) {
         return false;
     }
-    /* TODO: reture false for concrete netfilters */
+
+    /* reture false for concrete netfilters */
+    if (g_str_equal(type, "filter-buffer")) {
+        return false;
+    }
+
     return true;
 }
 

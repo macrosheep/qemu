@@ -14,9 +14,11 @@
 #include "qapi/dealloc-visitor.h"
 #include "qemu/config-file.h"
 #include "qmp-commands.h"
+#include "qemu/iov.h"
 
 #include "net/filter.h"
 #include "net/net.h"
+#include "net/queue.h"
 
 static QTAILQ_HEAD(, NetFilterState) net_filters;
 
@@ -125,6 +127,37 @@ void qmp_netfilter_del(const char *id, Error **errp)
 
     qemu_del_net_filter(nf);
     qemu_opts_del(opts);
+}
+
+ssize_t qemu_netfilter_pass_to_next(NetFilterState *nf, NetPacket *packet)
+{
+    int ret = 0;
+    NetFilterState *next = QTAILQ_NEXT(nf, next);
+    struct iovec iov = {
+        .iov_base = (void *)packet->data,
+        .iov_len = packet->size
+    };
+
+    while (next) {
+        if (next->chain == nf->chain || next->chain == NET_FILTER_ALL) {
+            ret = next->info->receive_iov(next, packet->sender, packet->flags,
+                                          &iov, 1, packet->sent_cb);
+            if (ret) {
+                return ret;
+            }
+        }
+        next = QTAILQ_NEXT(next, next);
+    }
+
+    /* we have gone through all filters, pass it to receiver */
+    if (packet->sender && packet->sender->peer) {
+        return qemu_net_queue_send_iov(packet->sender->peer->incoming_queue,
+                                       packet->sender, packet->flags,
+                                       &iov, 1, packet->sent_cb);
+    }
+
+    /* no receiver, or sender is deleted, drop this packet, return success */
+    return packet->size;
 }
 
 typedef int (NetFilterInit)(const NetFilterOptions *opts,

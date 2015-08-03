@@ -14,9 +14,11 @@
 #include "qapi/dealloc-visitor.h"
 #include "qemu/config-file.h"
 #include "qmp-commands.h"
+#include "qemu/iov.h"
 
 #include "net/filter.h"
 #include "net/net.h"
+#include "net/queue.h"
 
 static QTAILQ_HEAD(, NetFilterState) net_filters;
 
@@ -128,6 +130,47 @@ void qmp_netfilter_del(const char *id, Error **errp)
 
     qemu_del_net_filter(nf);
     qemu_opts_del(opts);
+}
+
+void qemu_netfilter_pass_to_next_iov(NetFilterState *nf,
+                                     NetClientState *sender,
+                                     unsigned flags,
+                                     const struct iovec *iov,
+                                     int iovcnt)
+{
+    int ret = 0;
+    ssize_t size = iov_size(iov, iovcnt);
+    NetFilterState *next = QTAILQ_NEXT(nf, next);
+
+    while (next) {
+        if (next->chain == nf->chain || next->chain == NET_FILTER_ALL) {
+            ret = next->info->receive_iov(next, sender, flags, iov, iovcnt);
+            if (ret == size) {
+                return;
+            }
+        }
+        next = QTAILQ_NEXT(next, next);
+    }
+
+    /* we have gone through all filters, pass it to receiver */
+    if (sender && sender->peer) {
+        qemu_net_queue_send_iov(sender->peer->incoming_queue, sender, flags,
+                                iov, iovcnt, NULL);
+    }
+}
+
+void qemu_netfilter_pass_to_next(NetFilterState *nf,
+                                 NetClientState *sender,
+                                 unsigned flags,
+                                 const uint8_t *data,
+                                 size_t size)
+{
+    struct iovec iov = {
+        .iov_base = (void *)data,
+        .iov_len = size
+    };
+
+    return qemu_netfilter_pass_to_next_iov(nf, sender, flags, &iov, 1);
 }
 
 typedef int (NetFilterInit)(const NetFilterOptions *opts,

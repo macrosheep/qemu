@@ -58,7 +58,7 @@ static void qemu_cleanup_net_filter(NetFilterState *nf)
     g_free(nf);
 }
 
-static void qemu_del_net_filter(NetFilterState *nf)
+void qemu_del_net_filter(NetFilterState *nf)
 {
     /* handle multi queue? */
     qemu_cleanup_net_filter(nf);

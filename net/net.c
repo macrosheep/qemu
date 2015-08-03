@@ -417,6 +417,8 @@ void qemu_del_net_client(NetClientState *nc)
 {
     NetClientState *ncs[MAX_QUEUE_NUM];
     int queues, i;
+    Filter *filter, *next;
+    QemuOpts *opts;
 
     assert(nc->info->type != NET_CLIENT_OPTIONS_KIND_NIC);
 
@@ -427,6 +429,18 @@ void qemu_del_net_client(NetClientState *nc)
                                           NET_CLIENT_OPTIONS_KIND_NIC,
                                           MAX_QUEUE_NUM);
     assert(queues != 0);
+
+    /*
+     * we delete/free the netfilter object attached to this netdev
+     * multiqueue netfilter is not supported now, so only delete
+     * nc->filters is enough.
+     */
+    QTAILQ_FOREACH_SAFE(filter, &nc->filters, next, next) {
+        opts = qemu_opts_find(qemu_find_opts_err("netfilter", NULL),
+                              filter->nf->name);
+        qemu_del_net_filter(filter->nf);
+        qemu_opts_del(opts);
+    }
 
     /* If there is a peer NIC, delete and cleanup client, but do not free. */
     if (nc->peer && nc->peer->info->type == NET_CLIENT_OPTIONS_KIND_NIC) {

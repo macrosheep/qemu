@@ -14,11 +14,13 @@
 #include "qapi/dealloc-visitor.h"
 #include "qemu/config-file.h"
 #include "qmp-commands.h"
+#include "qemu/iov.h"
 
 #include "net/filter.h"
 #include "net/net.h"
 #include "net/vhost_net.h"
 #include "filters.h"
+#include "net/queue.h"
 
 static QTAILQ_HEAD(, NetFilterState) net_filters;
 
@@ -129,6 +131,65 @@ void qmp_netfilter_del(const char *id, Error **errp)
     }
 
     qemu_del_net_filter(nf);
+}
+
+ssize_t qemu_netfilter_pass_to_next(NetClientState *sender,
+                                    unsigned flags,
+                                    const struct iovec *iov,
+                                    int iovcnt,
+                                    void *opaque)
+{
+    int ret = 0;
+    int chain;
+    NetFilterState *nf = opaque;
+    NetFilterState *next = QTAILQ_NEXT(nf, next);
+
+    if (!sender || !sender->peer) {
+        /* no receiver, or sender been deleted, no need to pass it further */
+        goto out;
+    }
+
+    if (nf->chain == NET_FILTER_ALL) {
+        if (sender == nf->netdev) {
+            /* This packet is sent by netdev itself */
+            chain = NET_FILTER_OUT;
+        } else {
+            chain = NET_FILTER_IN;
+        }
+    } else {
+        chain = nf->chain;
+    }
+
+    while (next) {
+        if (next->chain == chain || next->chain == NET_FILTER_ALL) {
+            /*
+             * if qemu_netfilter_pass_to_next been called, means that
+             * the packet has been hold by filter and has already retured size
+             * to the sender, so sent_cb shouldn't be called later, just
+             * pass NULL to next.
+             */
+            ret = next->info->receive_iov(next, sender, flags, iov,
+                                          iovcnt, NULL);
+            if (ret) {
+                return ret;
+            }
+        }
+        next = QTAILQ_NEXT(next, next);
+    }
+
+    /*
+     * We have gone through all filters, pass it to receiver.
+     * Do the valid check again incase sender or receiver been
+     * deleted while we go through filters.
+     */
+    if (sender && sender->peer) {
+        return qemu_net_queue_send_iov(sender->peer->incoming_queue,
+                                       sender, flags, iov, iovcnt, NULL);
+    }
+
+out:
+    /* no receiver, or sender been deleted */
+    return iov_size(iov, iovcnt);
 }
 
 typedef int (NetFilterInit)(const NetFilter *netfilter,

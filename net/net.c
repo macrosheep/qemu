@@ -339,6 +339,19 @@ void qemu_netdev_remove_filter(NetClientState *nc, NetFilterState *nf)
     remove_filter(nc, filter);
 }
 
+NetFilterState *qemu_netdev_next_filter(NetClientState *nc, NetFilterState *nf)
+{
+    Filter *filter = NULL;
+
+    QTAILQ_FOREACH(filter, &nc->filters, next) {
+        if (filter->nf == nf) {
+            break;
+        }
+    }
+
+    return QTAILQ_NEXT(filter, next)->nf;
+}
+
 NICState *qemu_new_nic(NetClientInfo *info,
                        NICConf *conf,
                        const char *model,

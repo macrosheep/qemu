@@ -131,6 +131,37 @@ void qmp_netfilter_del(const char *id, Error **errp)
     qemu_opts_del(opts);
 }
 
+void qemu_netfilter_pass_to_next_iov(NetFilterState *nf,
+                                     NetClientState *sender,
+                                     unsigned flags,
+                                     const struct iovec *iov,
+                                     int iovcnt)
+{
+    NetFilterState *next = qemu_netdev_next_filter(nf->netdev, nf);
+
+    while (next) {
+        if (next->chain == nf->chain || next->chain == NET_FILTER_ALL) {
+            next->info->receive_iov(next, sender, flags, iov, iovcnt);
+            return;
+        }
+        next = qemu_netdev_next_filter(next->netdev, next);
+    }
+}
+
+void qemu_netfilter_pass_to_next(NetFilterState *nf,
+                                 NetClientState *sender,
+                                 unsigned flags,
+                                 const uint8_t *data,
+                                 size_t size)
+{
+    struct iovec iov = {
+        .iov_base = (void *)data,
+        .iov_len = size
+    };
+
+    return qemu_netfilter_pass_to_next_iov(nf, sender, flags, &iov, 1);
+}
+
 typedef int (NetFilterInit)(const NetFilterOptions *opts,
                             const char *name, int chain,
                             NetClientState *netdev, Error **errp);

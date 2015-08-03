@@ -117,6 +117,7 @@ NetClientState *qemu_new_net_client(NetClientInfo *info,
                                     const char *name);
 int qemu_netdev_add_filter(NetClientState *nc, NetFilterState *nf);
 void qemu_netdev_remove_filter(NetClientState *nc, NetFilterState *nf);
+NetFilterState *qemu_netdev_next_filter(NetClientState *nc, NetFilterState *nf);
 NICState *qemu_new_nic(NetClientInfo *info,
                        NICConf *conf,
                        const char *model,

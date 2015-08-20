@@ -44,6 +44,7 @@ struct NetFilterState {
     char *name;
     NetClientState *netdev;
     int chain;
+    char info_str[256];
     QTAILQ_ENTRY(NetFilterState) global_list;
     QTAILQ_ENTRY(NetFilterState) next;
 };
@@ -55,6 +56,7 @@ NetFilterState *qemu_new_net_filter(NetFilterInfo *info,
                                     int chain);
 void qemu_del_net_filter(NetFilterState *nf);
 void netfilter_add(QemuOpts *opts, Error **errp);
+const char *qemu_netfilter_get_chain_str(int chain);
 
 /* pass the packet to the next filter */
 ssize_t qemu_netfilter_pass_to_next(NetClientState *sender,

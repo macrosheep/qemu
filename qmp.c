@@ -680,6 +680,7 @@ void qmp_object_del(const char *id, Error **errp)
 {
     Object *container;
     Object *obj;
+    QemuOpts *opts;
 
     container = object_get_objects_root();
     obj = object_resolve_path_component(container, id);
@@ -693,6 +694,9 @@ void qmp_object_del(const char *id, Error **errp)
         return;
     }
     object_unparent(obj);
+
+    opts = qemu_opts_find(qemu_find_opts_err("object", NULL), id);
+    qemu_opts_del(opts);
 }
 
 MemoryDeviceInfoList *qmp_query_memory_devices(Error **errp)

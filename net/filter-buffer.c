@@ -70,6 +70,7 @@ static void filter_buffer_cleanup(NetFilterState *nf)
 {
     FilterBufferState *s = FILTER_BUFFER(nf);
 
+printf("filter buffer cleanup==============%d\n", s->interval);
     if (s->interval) {
         timer_del(&s->release_timer);
     }
@@ -84,7 +85,7 @@ static void filter_buffer_cleanup(NetFilterState *nf)
 static void filter_buffer_setup(NetFilterState *nf, Error **errp)
 {
     FilterBufferState *s = FILTER_BUFFER(nf);
-
+printf("filter buffer setup!!!!!!!!!!!!!\n");
     /*
      * this check should be dropped when there're VM FT solutions like MC
      * or COLO use this filter to release packets on demand.

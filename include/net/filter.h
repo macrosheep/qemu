@@ -50,6 +50,7 @@ struct NetFilterState {
     Object parent;
 
     /* protected */
+    char *name;
     char *netdev_id;
     NetClientState *netdev;
     NetFilterChain chain;

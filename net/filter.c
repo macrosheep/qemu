@@ -129,6 +129,8 @@ static void netfilter_cleanup(Object *obj)
     if (!QTAILQ_EMPTY(&net_filters)) {
         QTAILQ_REMOVE(&net_filters, nf, global_list);
     }
+
+    g_free(nf->name);
 }
 
 static void netfilter_complete(UserCreatable *uc, Error **errp)
@@ -162,6 +164,7 @@ static void netfilter_complete(UserCreatable *uc, Error **errp)
     }
 
     QTAILQ_INIT(&net_filters);
+    nf->name = object_get_canonical_path_component(OBJECT(nf));
     nf->netdev = ncs[0];
 
     if (nfc->setup) {

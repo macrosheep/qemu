@@ -1183,7 +1183,7 @@ void print_net_client(Monitor *mon, NetClientState *nc)
     }
     QTAILQ_FOREACH(nf, &nc->filters, next) {
         monitor_printf(mon, "  - %s: type=%s,netdev=%s,chain=%s",
-                       object_get_canonical_path_component(OBJECT(nf)),
+                       nf->name,
                        object_get_typename(OBJECT(nf)),
                        nf->netdev->name,
                        NetFilterChain_lookup[nf->chain]);

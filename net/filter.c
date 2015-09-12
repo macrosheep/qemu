@@ -15,6 +15,7 @@
 #include "net/vhost_net.h"
 #include "qom/object_interfaces.h"
 #include "qemu/iov.h"
+#include "qapi/string-output-visitor.h"
 
 static QTAILQ_HEAD(, NetFilterState) net_filters;
 
@@ -133,13 +134,28 @@ static void netfilter_cleanup(Object *obj)
     g_free(nf->name);
 }
 
+static void property_table_foreach_func(gpointer key, gpointer val,
+                                        gpointer opaque)
+{
+    char *name = key;
+    char *value = val;
+    Object *obj = opaque;
+
+    object_property_parse(obj, value, name, NULL);
+}
+
 static void netfilter_complete(UserCreatable *uc, Error **errp)
 {
-    NetFilterState *nf = NETFILTER(uc);
+    NetFilterState *nf = NETFILTER(uc), *nfq = NULL;
     NetClientState *ncs[MAX_QUEUE_NUM];
-    NetFilterClass *nfc = NETFILTER_GET_CLASS(uc);
-    int queues;
+    NetFilterClass *nfc = NETFILTER_GET_CLASS(uc), *nfqc = NULL;
+    int queues, i;
     Error *local_err = NULL;
+    Object *obj = NULL;
+    ObjectProperty *prop;
+    StringOutputVisitor *ov;
+    char *str = NULL;
+    GHashTable *proptable = NULL;
 
     if (!nf->netdev_id) {
         error_setg(errp, "Parameter 'netdev' is required");
@@ -152,9 +168,6 @@ static void netfilter_complete(UserCreatable *uc, Error **errp)
     if (queues < 1) {
         error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "netdev",
                    "a network backend id");
-        return;
-    } else if (queues > 1) {
-        error_setg(errp, "Multi queue is not supported");
         return;
     }
 
@@ -176,6 +189,66 @@ static void netfilter_complete(UserCreatable *uc, Error **errp)
     }
     QTAILQ_INSERT_TAIL(&net_filters, nf, global_list);
     QTAILQ_INSERT_TAIL(&nf->netdev->filters, nf, next);
+
+    /* Let's handle the multiqueue case */
+    /*
+     * Get the properties of the filter except "type" property,
+     * because we will create a filter object with type name.
+     */
+    proptable = g_hash_table_new(NULL, NULL);
+    QTAILQ_FOREACH(prop, &OBJECT(nf)->properties, node) {
+        if (!strcmp(prop->name, "type")) {
+            continue;
+        }
+        ov = string_output_visitor_new(false);
+        object_property_get(OBJECT(nf), string_output_get_visitor(ov),
+                            prop->name, errp);
+        str = string_output_get_string(ov);
+        string_output_visitor_cleanup(ov);
+        g_hash_table_insert(proptable, prop->name, str);
+    }
+
+    for (i = 1; i < queues; i++) {
+        obj = object_new(object_get_typename(OBJECT(nf)));
+        /* set filter properties */
+        nfq = NETFILTER(obj);
+        nfq->name = g_strdup(nf->name);
+        nfq->netdev = ncs[i];
+        g_hash_table_foreach(proptable, property_table_foreach_func, obj);
+
+        /* add other queue's filter object as the first object's child */
+        object_property_add_child(OBJECT(nf),
+                                  g_strdup_printf("%s-queue-%d", nf->name, i),
+                                  obj, &local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            goto out;
+        }
+
+        /* setup filter */
+        nfqc = NETFILTER_GET_CLASS(obj);
+        if (nfqc->setup) {
+            nfqc->setup(nfq, &local_err);
+            if (local_err) {
+                error_propagate(errp, local_err);
+                goto out;
+            }
+        }
+        QTAILQ_INSERT_TAIL(&net_filters, nfq, global_list);
+        QTAILQ_INSERT_TAIL(&nfq->netdev->filters, nfq, next);
+        object_unref(obj);
+    }
+
+    g_hash_table_unref(proptable);
+    return;
+
+out:
+    if (proptable) {
+        g_hash_table_unref(proptable);
+    }
+    if (obj) {
+        object_unref(obj);
+    }
 }
 
 static bool netfilter_can_be_deleted(UserCreatable *uc, Error **errp)

@@ -135,11 +135,13 @@ static void netfilter_cleanup(Object *obj)
 
 static void netfilter_complete(UserCreatable *uc, Error **errp)
 {
-    NetFilterState *nf = NETFILTER(uc);
+    NetFilterState *nf = NETFILTER(uc), *nfq = NULL;
     NetClientState *ncs[MAX_QUEUE_NUM];
-    NetFilterClass *nfc = NETFILTER_GET_CLASS(uc);
-    int queues;
+    NetFilterClass *nfc = NETFILTER_GET_CLASS(uc), *nfqc = NULL;
+    int queues, i;
     Error *local_err = NULL;
+    Object *obj = NULL;
+    char *propstr = NULL, *val = NULL;
 
     if (!nf->netdev_id) {
         error_setg(errp, "Parameter 'netdev' is required");
@@ -152,9 +154,6 @@ static void netfilter_complete(UserCreatable *uc, Error **errp)
     if (queues < 1) {
         error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "netdev",
                    "a network backend id");
-        return;
-    } else if (queues > 1) {
-        error_setg(errp, "Multi queue is not supported");
         return;
     }
 
@@ -176,6 +175,64 @@ static void netfilter_complete(UserCreatable *uc, Error **errp)
     }
     QTAILQ_INSERT_TAIL(&net_filters, nf, global_list);
     QTAILQ_INSERT_TAIL(&nf->netdev->filters, nf, next);
+
+    /* Let's handle the multiqueue case */
+    for (i = 1; i < queues; i++) {
+        obj = object_new(object_get_typename(OBJECT(nf)));
+        /* set filter properties */
+        nfq = NETFILTER(obj);
+        nfq->name = g_strdup(nf->name);
+        nfq->netdev = ncs[i];
+        nfq->chain = nf->chain;
+        propstr = (strlen(nf->info_str) > 0) ?
+                  strtok(g_strdup(nf->info_str), ",") : NULL;
+        while (propstr) {
+            val = strchr(propstr, '=');
+            if (val) {
+                *val = 0;
+                val++;
+                object_property_parse(obj, val, propstr, &local_err);
+                if (local_err) {
+                    error_propagate(errp, local_err);
+                    goto out;
+                }
+            } else {
+                error_setg(errp, "Expected key=value format, found %s.",
+                           propstr);
+                goto out;
+            }
+            propstr = strtok(NULL, ",");
+        }
+
+        /* add other queues as the first queue's child */
+        object_property_add_child(OBJECT(nf),
+                                  g_strdup_printf("%s-queue-%d", nf->name, i),
+                                  obj, &local_err);
+        if (local_err) {
+            error_propagate(errp, local_err);
+            goto out;
+        }
+
+        /* setup filter */
+        nfqc = NETFILTER_GET_CLASS(obj);
+        if (nfqc->setup) {
+            nfqc->setup(nfq, &local_err);
+            if (local_err) {
+                error_propagate(errp, local_err);
+                goto out;
+            }
+        }
+        QTAILQ_INSERT_TAIL(&net_filters, nfq, global_list);
+        QTAILQ_INSERT_TAIL(&nfq->netdev->filters, nfq, next);
+        object_unref(obj);
+    }
+
+    return;
+
+out:
+    if (obj) {
+        object_unref(obj);
+    }
 }
 
 static bool netfilter_can_be_deleted(UserCreatable *uc, Error **errp)

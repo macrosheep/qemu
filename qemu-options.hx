@@ -3643,6 +3643,20 @@ in PEM format, in filenames @var{ca-cert.pem}, @var{ca-crl.pem} (optional),
 @var{server-cert.pem} (only servers), @var{server-key.pem} (only servers),
 @var{client-cert.pem} (only clients), and @var{client-key.pem} (only clients).
 
+@item -object filter-buffer,id=@var{id},netdev=@var{netdevid},interval=@var{t}[,queue=@var{all|rx|tx}]
+
+Interval @var{t} can't be 0, this filter batches the packet delivery: all
+packets arriving in a given interval on netdev @var{netdevid} are delayed
+until the end of the interval. Interval is in microseconds.
+
+queue @var{all|rx|tx} is an option that can be applied to any netfilter.
+
+@option{all}: the filter will receive packets both sent to/by the netdev (default).
+
+@option{rx}: the filter will receive packets sent to the netdev.
+
+@option{tx}: the filter will receive packets sent by the netdev.
+
 @end table
 
 ETEXI
